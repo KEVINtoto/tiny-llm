@@ -27,6 +27,7 @@ _PROTECTED_NAMES = frozenset(
         ".npmrc",
         ".pypirc",
         ".ssh",
+        ".tiny-llm",
         "id_rsa",
         "id_ed25519",
     }
