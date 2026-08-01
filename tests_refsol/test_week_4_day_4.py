@@ -299,12 +299,13 @@ def test_task_3_loop_records_assistant_and_call_before_tool(tmp_path, monkeypatc
     )
     original = workspace._atomic_write
 
-    def checked_write(path, content):
-        assert [event.type for event in session.events[-2:]] == [
+    def checked_write(path, content, **write_state):
+        assert [event.type for event in session.events[-3:]] == [
             "assistant_message",
             "tool_call",
+            "mutation_intent",
         ]
-        original(path, content)
+        original(path, content, **write_state)
 
     monkeypatch.setattr(workspace, "_atomic_write", checked_write)
 

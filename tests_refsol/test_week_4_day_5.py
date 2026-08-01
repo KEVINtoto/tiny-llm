@@ -319,7 +319,7 @@ def test_task_2_tracks_a_file_when_commit_outcome_is_uncertain(tmp_path, monkeyp
     )
     workspace.read_file("answer.py")
 
-    def replace_then_interrupt(target, content):
+    def replace_then_interrupt(target, content, **_write_state):
         target.write_bytes(content)
         raise KeyboardInterrupt
 
@@ -598,7 +598,7 @@ def test_task_3_reports_when_process_group_termination_fails(tmp_path, monkeypat
     assert workspace.command_cleanup_incomplete
 
 
-def test_task_3_popen_failure_has_no_command_side_effect_flag(tmp_path, monkeypatch):
+def test_task_3_popen_failure_is_reported_as_launch_uncertainty(tmp_path, monkeypatch):
     command = ("safe-tool",)
     workspace = Workspace(
         ToolPolicy(tmp_path, allowed_commands=(command,)),
@@ -612,7 +612,8 @@ def test_task_3_popen_failure_has_no_command_side_effect_flag(tmp_path, monkeypa
     result = workspace.execute(ToolAction("run_command", {"argv": list(command)}))
 
     assert result == "error: cannot start"
-    assert not workspace.command_side_effects_untracked
+    assert workspace.command_side_effects_untracked
+    assert workspace.command_cleanup_incomplete
 
 
 class _CompletedProcess:
