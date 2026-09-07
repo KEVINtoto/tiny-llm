@@ -1,0 +1,851 @@
+[
+  {
+    "source": "tests_refsol/test_week_4_day_4.py",
+    "target": "agent/tests/test_week_4_day_4.rs",
+    "tests": [
+      {
+        "python": "test_task_1_model_checkpoint_has_one_aligned_fake_cache_snapshot",
+        "rust": [
+          "test_task_1_model_checkpoint_has_one_aligned_fake_cache_snapshot"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_agent_checkpoint_binds_task_messages_and_model_state",
+        "rust": [
+          "test_task_2_agent_checkpoint_binds_task_messages_and_model_state"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_checkpoint_is_saved_after_the_complete_tool_observation",
+        "rust": [
+          "test_task_3_checkpoint_is_saved_after_the_complete_tool_observation"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_4_checkpoint_api_fails_clearly_before_a_boundary",
+        "rust": [
+          "test_task_4_checkpoint_api_fails_clearly_before_a_boundary"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_resume_requires_valid_content_and_a_restorable_model",
+        "rust": [
+          "test_task_5_resume_requires_valid_content_and_a_restorable_model"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_fresh_model_restores_the_exact_next_response",
+        "rust": [
+          "test_task_6_fresh_model_restores_the_exact_next_response"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_7_edit_checkpoint_resume_validates_without_replaying_effect",
+        "rust": [
+          "test_task_7_edit_checkpoint_resume_validates_without_replaying_effect"
+        ],
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_6.py",
+    "target": "agent/tests/test_week_4_day_6.rs",
+    "tests": [
+      {
+        "python": "test_task_1_status_reports_only_the_complete_checkpoint_boundary",
+        "rust": [
+          "test_task_1_status_reports_only_the_complete_checkpoint_boundary"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_status_preview_is_bounded_and_inspection_is_pure",
+        "rust": [
+          "test_task_2_status_preview_is_bounded_and_inspection_is_pure"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_status_rejects_protocol_invalid_tool_actions",
+        "rust": [
+          "test_task_3_status_rejects_non_json_tool_action",
+          "test_task_3_status_rejects_final_action",
+          "test_task_3_status_rejects_unknown_tool",
+          "test_task_3_status_rejects_missing_read_file_path",
+          "test_task_3_status_rejects_non_string_read_file_path",
+          "test_task_3_status_rejects_unexpected_read_file_field"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_status_rejects_an_incomplete_tool_boundary",
+        "rust": [
+          "test_task_3_status_rejects_an_incomplete_tool_boundary"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_steering_is_one_visible_message_in_stable_order",
+        "rust": [
+          "test_task_4_steering_is_one_visible_message_in_stable_order"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_5_steered_resume_does_not_replay_the_completed_edit",
+        "rust": [
+          "test_task_5_steered_resume_does_not_replay_the_completed_edit"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_6_steering_and_checkpoint_validation_fail_closed",
+        "rust": [
+          "test_task_6_steering_and_checkpoint_validation_fail_closed"
+        ],
+        "status": "active"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_3.py",
+    "target": "agent/tests/test_week_4_day_3.rs",
+    "tests": [
+      {
+        "python": "test_task_1_policy_enables_only_explicit_effects",
+        "rust": [
+          "test_task_1_policy_enables_only_explicit_effects"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_mutations_require_read_preflight_and_approval",
+        "rust": [
+          "test_task_2_mutations_require_read_preflight_and_approval"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_rechecks_stale_bytes_after_approval",
+        "rust": [
+          "test_task_3_rechecks_stale_bytes_after_approval"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_exact_edit_uses_same_directory_replace_and_receipt",
+        "rust": [
+          "test_task_4_exact_edit_uses_same_directory_replace_and_receipt"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_write_creates_new_files_but_observes_existing_files",
+        "rust": [
+          "test_task_5_write_creates_new_files_but_observes_existing_files"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_validation_uses_exact_argv_and_records_output",
+        "rust": [
+          "test_task_6_validation_uses_exact_argv_and_records_output"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_7_duplicate_call_ids_do_not_repeat_an_effect",
+        "rust": [
+          "test_task_7_duplicate_call_ids_do_not_repeat_an_effect"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_8_jsonl_receipts_reopen_and_detect_tampering",
+        "rust": [
+          "test_task_8_jsonl_receipts_reopen_and_detect_tampering"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_9_agent_reads_edits_validates_and_finishes",
+        "rust": [
+          "test_task_9_agent_reads_edits_validates_and_finishes"
+        ],
+        "status": "active"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_5.py",
+    "target": "agent/tests/test_week_4_day_5.rs",
+    "tests": [
+      {
+        "python": "test_task_1_compacts_old_effect_and_keeps_recent_interaction_visible",
+        "rust": [
+          "test_task_1_compacts_old_effect_and_keeps_recent_interaction_visible"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_compact_record_retains_the_evidence_needed_for_a_final_answer",
+        "rust": [
+          "test_task_2_compact_record_retains_the_evidence_needed_for_a_final_answer"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_requires_exact_receipt_evidence_and_preserves_the_input",
+        "rust": [
+          "test_task_3_requires_exact_receipt_evidence_and_preserves_the_input"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_leaves_unreceipted_tool_observations_verbatim",
+        "rust": [
+          "test_task_4_leaves_unreceipted_tool_observations_verbatim"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_compacted_view_continues_through_the_existing_model_protocol",
+        "rust": [
+          "test_task_5_compacted_view_continues_through_the_existing_model_protocol"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_compaction_is_idempotent_and_validates_its_small_policy",
+        "rust": [
+          "test_task_6_compaction_is_idempotent_and_validates_its_small_policy"
+        ],
+        "status": "active"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_8.py",
+    "target": "agent/tests/test_week_4_day_8.rs",
+    "tests": [
+      {
+        "python": "test_task_1_structured_denial_requires_and_exposes_one_operator_reason",
+        "rust": [
+          "test_task_1_structured_denial_requires_and_exposes_one_operator_reason"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_1_legacy_boolean_approval_remains_compatible",
+        "rust": [
+          "test_task_1_legacy_boolean_approval_remains_compatible"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_cached_prefix_is_prefilled_once_and_reused_by_both_forks",
+        "rust": [
+          "test_task_2_cached_prefix_is_prefilled_once_and_reused_by_both_forks"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix",
+        "rust": [
+          "test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence",
+        "rust": [
+          "test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_5_selection_requires_one_named_passing_outcome",
+        "rust": [
+          "test_task_5_selection_requires_one_named_passing_outcome"
+        ],
+        "status": "active"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_2.py",
+    "target": "agent/tests/test_week_4_day_2.rs",
+    "tests": [
+      {
+        "python": "test_task_1_policy_requires_a_directory_and_positive_limits",
+        "rust": [
+          "test_task_1_policy_requires_a_directory_and_positive_limits"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_lists_and_reads_workspace_files",
+        "rust": [
+          "test_task_2_lists_and_reads_workspace_files"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_rejects_escapes_secrets_and_symlinks",
+        "rust": [
+          "test_task_3_rejects_escapes_secrets_and_symlinks"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_bounds_directory_and_file_observations",
+        "rust": [
+          "test_task_4_bounds_directory_and_file_observations"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_rejects_directories_and_non_utf8_files",
+        "rust": [
+          "test_task_5_rejects_directories_and_non_utf8_files"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_dispatch_returns_recoverable_observations",
+        "rust": [
+          "test_task_6_dispatch_returns_recoverable_observations"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_7_prompt_and_parser_expose_only_read_tools",
+        "rust": [
+          "test_task_7_prompt_and_parser_expose_only_read_tools"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_8_agent_lists_reads_observes_and_finishes",
+        "rust": [
+          "test_task_8_agent_lists_reads_observes_and_finishes"
+        ],
+        "status": "active"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_7.py",
+    "target": "agent/tests/test_week_4_day_7.rs",
+    "tests": [
+      {
+        "python": "test_task_1_end_to_end_run_passes_declared_observable_facts",
+        "rust": [
+          "test_task_1_end_to_end_run_passes_declared_observable_facts"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_each_wrong_fact_fails_only_its_named_check",
+        "rust": [
+          "test_task_2_each_wrong_fact_fails_only_its_named_check"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_incomplete_run_cannot_pass_from_matching_final_text",
+        "rust": [
+          "test_task_2_incomplete_run_cannot_pass_from_matching_final_text"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_file_content_requires_exact_bytes",
+        "rust": [
+          "test_task_2_file_content_requires_exact_bytes"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_file_content_does_not_normalize_newlines",
+        "rust": [
+          "test_task_2_file_content_does_not_normalize_newlines"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_invalid_utf8_is_not_ignored",
+        "rust": [
+          "test_task_2_invalid_utf8_is_not_ignored"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_invalid_utf8_is_not_replaced",
+        "rust": [
+          "test_task_2_invalid_utf8_is_not_replaced"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_tool_and_result_must_match_the_same_event",
+        "rust": [
+          "test_task_2_tool_and_result_must_match_the_same_event"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_each_receipt_fact_is_independently_required",
+        "rust": [
+          "test_task_2_each_receipt_fact_is_independently_required"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_nonessential_final_phrasing_and_event_order_are_not_graded",
+        "rust": [
+          "test_task_3_nonessential_final_phrasing_and_event_order_are_not_graded"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_missing_unreadable_and_absent_evidence_become_failed_checks",
+        "rust": [
+          "test_task_4_missing_unreadable_and_absent_evidence_become_failed_checks"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_tampered_receipt_log_becomes_failed_checks",
+        "rust": [
+          "test_task_5_tampered_receipt_log_becomes_failed_checks"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_evaluation_is_pure",
+        "rust": [
+          "test_task_6_evaluation_is_pure"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_file_evidence_does_not_dispatch_the_stateful_read_tool",
+        "rust": [
+          "test_task_6_file_evidence_does_not_dispatch_the_stateful_read_tool"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_7_invalid_evaluation_specifications_fail_closed",
+        "rust": [
+          "test_task_7_invalid_evaluation_specifications_fail_closed"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_7_receipt_lookup_errors_become_failed_checks",
+        "rust": [
+          "test_task_7_receipt_lookup_errors_become_failed_checks"
+        ],
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_1.py",
+    "target": "agent/tests/test_week_4_day_1.rs",
+    "tests": [
+      {
+        "python": "test_task_1_initial_messages_preserve_the_task",
+        "rust": [
+          "test_task_1_initial_messages_preserve_the_task"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_1_rejects_an_empty_task",
+        "rust": [
+          "test_task_1_rejects_an_empty_task"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_executes_a_tool_appends_its_result_and_finishes",
+        "rust": [
+          "test_task_2_executes_a_tool_appends_its_result_and_finishes"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_returns_invalid_and_unknown_actions_to_the_model",
+        "rust": [
+          "test_task_3_returns_invalid_and_unknown_actions_to_the_model"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_stops_at_the_step_budget",
+        "rust": [
+          "test_task_4_stops_at_the_step_budget"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_agent_observes_then_finishes",
+        "rust": [
+          "test_task_5_agent_observes_then_finishes"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_agent_recovers_from_invalid_json",
+        "rust": [
+          "test_task_6_agent_recovers_from_invalid_json"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_7_agent_stops_repeated_actions",
+        "rust": [
+          "test_task_7_agent_stops_repeated_actions"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_8_observation_propagation",
+        "rust": [
+          "test_task_8_observation_propagation"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_8_known_but_disabled_tool_is_rejected",
+        "rust": [
+          "test_task_8_known_but_disabled_tool_is_rejected"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_9_positive_limit_fails_closed",
+        "rust": [
+          "test_task_9_positive_limit_fails_closed"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_9_context_limit_stops_the_loop",
+        "rust": [
+          "test_task_9_context_limit_stops_the_loop"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_9_invalid_action_limit_stops_the_loop",
+        "rust": [
+          "test_task_9_invalid_action_limit_stops_the_loop"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_10_generation_uses_the_exact_prompt_offsets_eos_and_releases",
+        "rust": [
+          "test_task_10_generation_uses_the_exact_prompt_offsets_eos_and_releases"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_10_generation_is_bounded_and_uses_one_fresh_cache_per_call",
+        "rust": [
+          "test_task_10_generation_is_bounded_and_uses_one_fresh_cache_per_call"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_10_generation_releases_every_cache_when_the_model_fails",
+        "rust": [
+          "test_task_10_generation_releases_every_cache_when_the_model_fails"
+        ],
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_starter_sync.py",
+    "target": "agent/tests/test_week_4_starter_sync.rs",
+    "tests": [
+      {
+        "python": "test_starter_public_contract_matches_reference",
+        "rust": [
+          "test_starter_public_contract_matches_reference"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_starter_is_solution_free_and_reference_is_implemented",
+        "rust": [
+          "test_starter_is_solution_free_and_reference_is_implemented"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_package_exports_match_the_published_day_9_surface",
+        "rust": [
+          "test_package_exports_match_the_published_day_9_surface"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_only_day_1_through_day_9_modules_exist_in_the_starter",
+        "rust": [
+          "test_only_day_1_through_day_9_modules_exist_in_the_starter"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_3_workspace_surface_remains_complete",
+        "rust": [
+          "test_day_3_workspace_surface_remains_complete"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_4_checkpoint_surface_remains_complete",
+        "rust": [
+          "test_day_4_checkpoint_surface_remains_complete"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_5_compaction_surface_is_complete",
+        "rust": [
+          "test_day_5_compaction_surface_is_complete"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_6_steering_surface_remains_complete",
+        "rust": [
+          "test_day_6_steering_surface_remains_complete"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_7_evaluation_surface_is_complete_and_has_no_future_api",
+        "rust": [
+          "test_day_7_evaluation_surface_is_complete_and_has_no_future_api"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_8_branching_surface_is_complete_and_has_no_future_api",
+        "rust": [
+          "test_day_8_branching_surface_is_complete_and_has_no_future_api"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_9_bounded_evidence_surface_is_complete_and_has_no_future_api",
+        "rust": [
+          "test_day_9_bounded_evidence_surface_is_complete_and_has_no_future_api"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_day_9_starter_range_cap_can_hold_one_max_width_utf8_character",
+        "rust": [
+          "test_day_9_starter_range_cap_can_hold_one_max_width_utf8_character"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_removed_catalog_hash_is_not_exported_or_declared",
+        "rust": [
+          "test_removed_catalog_hash_is_not_exported_or_declared"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_starter_does_not_import_the_reference_solution",
+        "rust": [
+          "test_starter_does_not_import_the_reference_solution"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_real_model_cli_exposes_only_the_learner_package",
+        "rust": [
+          "test_real_model_cli_exposes_only_the_learner_package"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_real_model_cli_discloses_command_side_effect_scope",
+        "rust": [
+          "test_real_model_cli_discloses_command_side_effect_scope"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_reference_observation_payload_mutations_are_killed",
+        "rust": [
+          "test_reference_observation_payload_mutations_are_killed"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_capstone_is_learner_only_and_stale_evaluator_is_fully_removed",
+        "rust": [
+          "test_capstone_is_learner_only_and_stale_evaluator_is_fully_removed"
+        ],
+        "status": "active"
+      }
+    ]
+  },
+  {
+    "source": "tests_refsol/test_week_4_day_9.py",
+    "target": "agent/tests/test_week_4_day_9.rs",
+    "tests": [
+      {
+        "python": "test_task_0_supplied_capstone_composes_the_completed_active_package",
+        "rust": [
+          "test_task_0_supplied_capstone_composes_the_completed_active_package"
+        ],
+        "status": "pending"
+      },
+      {
+        "python": "test_task_1_artifact_store_preserves_exact_bytes_and_identity",
+        "rust": [
+          "test_task_1_artifact_store_preserves_exact_bytes_and_identity"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_oversized_result_becomes_bounded_verifiable_observation",
+        "rust": [
+          "test_task_2_oversized_result_becomes_bounded_verifiable_observation"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_externalization_uses_utf8_bytes_at_the_exact_inline_boundary",
+        "rust": [
+          "test_task_2_externalization_uses_utf8_bytes_at_the_exact_inline_boundary"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_inline_cap_plus_one_byte_is_externalized",
+        "rust": [
+          "test_task_2_inline_cap_plus_one_byte_is_externalized"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_four_byte_unicode_bounds_the_whole_encoded_observation",
+        "rust": [
+          "test_task_2_four_byte_unicode_bounds_the_whole_encoded_observation"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_2_four_byte_unicode_preview_ranges_are_byte_accurate",
+        "rust": [
+          "test_task_2_four_byte_unicode_preview_ranges_are_byte_accurate"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_explicit_virtual_read_returns_only_the_bound_range",
+        "rust": [
+          "test_task_3_explicit_virtual_read_returns_only_the_bound_range"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_selected_unicode_byte_count_is_not_a_character_count",
+        "rust": [
+          "test_task_3_selected_unicode_byte_count_is_not_a_character_count"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_advertised_unicode_range_is_aligned_and_runnable",
+        "rust": [
+          "test_task_3_advertised_unicode_range_is_aligned_and_runnable"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_range_cap_must_hold_one_max_width_utf8_character",
+        "rust": [
+          "test_task_3_range_cap_must_hold_one_max_width_utf8_character"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_four_byte_range_cap_is_advertised_and_runnable",
+        "rust": [
+          "test_task_3_four_byte_range_cap_is_advertised_and_runnable"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_3_four_byte_cap_still_rejects_a_supplied_misaligned_range",
+        "rust": [
+          "test_task_3_four_byte_cap_still_rejects_a_supplied_misaligned_range"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_range_failures_are_ordinary_and_do_not_fall_through",
+        "rust": [
+          "test_task_4_range_failures_are_ordinary_and_do_not_fall_through"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_oversized_decimal_bounds_are_ordinary_and_do_not_fall_through",
+        "rust": [
+          "test_task_4_oversized_decimal_bounds_are_ordinary_and_do_not_fall_through"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_unknown_store_and_tampering_do_not_leak_artifacts",
+        "rust": [
+          "test_task_4_unknown_store_and_tampering_do_not_leak_artifacts"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_4_range_cap_plus_one_is_rejected",
+        "rust": [
+          "test_task_4_range_cap_plus_one_is_rejected"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_5_existing_agent_loop_retrieves_evidence_then_continues",
+        "rust": [
+          "test_task_5_existing_agent_loop_retrieves_evidence_then_continues"
+        ],
+        "status": "active"
+      },
+      {
+        "python": "test_task_6_small_and_error_results_remain_inline_and_state_is_delegated",
+        "rust": [
+          "test_task_6_small_and_error_results_remain_inline_and_state_is_delegated"
+        ],
+        "status": "active"
+      }
+    ]
+  }
+]

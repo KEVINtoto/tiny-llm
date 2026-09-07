@@ -1,0 +1,55 @@
+[package]
+name = "tiny-llm-agent"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "agent/lib.rs"
+
+[dependencies]
+serde_json = "1"
+
+[dev-dependencies]
+sha2 = "0.10"
+syn = { version = "2", features = ["full"] }
+tempfile = "3"
+
+[[test]]
+name = "test_week_4_day_1"
+path = "agent/tests/test_week_4_day_1.rs"
+
+[[test]]
+name = "test_week_4_day_2"
+path = "agent/tests/test_week_4_day_2.rs"
+
+[[test]]
+name = "test_week_4_day_3"
+path = "agent/tests/test_week_4_day_3.rs"
+
+[[test]]
+name = "test_week_4_day_4"
+path = "agent/tests/test_week_4_day_4.rs"
+
+[[test]]
+name = "test_week_4_day_5"
+path = "agent/tests/test_week_4_day_5.rs"
+
+[[test]]
+name = "test_week_4_day_6"
+path = "agent/tests/test_week_4_day_6.rs"
+
+[[test]]
+name = "test_week_4_day_7"
+path = "agent/tests/test_week_4_day_7.rs"
+
+[[test]]
+name = "test_week_4_day_8"
+path = "agent/tests/test_week_4_day_8.rs"
+
+[[test]]
+name = "test_week_4_day_9"
+path = "agent/tests/test_week_4_day_9.rs"
+
+[[test]]
+name = "test_week_4_starter_sync"
+path = "agent/tests/test_week_4_starter_sync.rs"
