@@ -49,7 +49,7 @@ impl AgentLimits {
 
     /// Reject budgets that could disable a stop condition.
     fn post_init(&self) -> Result<(), AgentError> {
-        // TODO: reject any non-positive budget.
+        // reject any non-positive budget.
         if self.max_steps <= 0 {
             return Err(AgentError("max_steps must be positive".into()));
         }
@@ -103,7 +103,7 @@ pub(crate) fn append_tool_result(
     response: &str,
     result: &str,
 ) -> Vec<Message> {
-    // TODO: append assistant + "Tool result: ..." user messages.
+    // append assistant + "Tool result: ..." user messages.
     let mut ret = vec![];
     ret.extend_from_slice(messages);
     ret.push(Message::from([
@@ -129,7 +129,7 @@ pub fn run_agent(
     limits: Option<&AgentLimits>,
     on_event: Option<&dyn Fn(&AgentEvent)>,
 ) -> Result<AgentRun, AgentError> {
-    // TODO: reject an empty task; build the system prompt and initial
+    // reject an empty task; build the system prompt and initial
     // messages; loop up to max_steps; parse each response with
     // parse_action(response, workspace.available_tools); feed invalid
     // actions back as "error: ..." observations; stop on FinalAction,
@@ -183,13 +183,6 @@ pub fn run_agent(
             }
         }
 
-        // let Ok(action) = parse_action(&event.response, Some(workspace.available_tools())) else {
-        //     invalid_actions += 1;
-        //     event.result = Some("error: invalid action".into());
-        //     messages = append_tool_result(&messages, &event.response, event.result.as_ref().unwrap());
-        //     continue;
-        // };
-
         match &event.action {
             Some(AgentAction::Tool(tool_action)) => {
                 event.result = Some(
@@ -214,7 +207,7 @@ pub fn run_agent(
 
         if let Some(prev_action) = run.events.last().and_then(|e| e.action.as_ref())
             && let Some(curr_action) = event.action.as_ref()
-            && std::mem::discriminant(prev_action) == std::mem::discriminant(curr_action)
+            && prev_action == curr_action
         {
             identical_actions += 1;
         } else {
