@@ -14,6 +14,7 @@ pub mod compaction;
 pub mod evaluation;
 pub mod evidence;
 pub mod generation;
+pub mod model_service;
 pub mod r#loop;
 pub mod protocol;
 pub mod receipts;

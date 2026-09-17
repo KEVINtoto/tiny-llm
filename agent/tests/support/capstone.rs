@@ -132,7 +132,7 @@ fn payload(text: &str, prefix: &str) -> Value {
 }
 
 pub fn run_capstone() -> Value {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_temp::tempdir().unwrap();
     let base = temp.path().join("base");
     fs::create_dir_all(base.join("workspace")).unwrap();
     let build_log = format!(
