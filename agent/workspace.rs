@@ -3,10 +3,32 @@
 //! Week 4, Day 3 learner surface for workspace effects.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::fs;
+use std::io::ErrorKind;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, Path, PathBuf};
 
-use crate::protocol::{AgentError, AgentWorkspace, ToolAction};
+use crate::protocol::{
+    AgentError, AgentWorkspace, LIST_FILES_TOOL_NAME, READ_FILE_TOOL_NAME, ToolAction,
+};
 use crate::receipts::ReceiptStore;
+
+fn is_protected(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        ".git"
+            | ".env"
+            | ".ssh"
+            | ".aws"
+            | "credentials"
+            | "id_rsa"
+            | "id_ed25519"
+            | "id_dsa"
+            | "id_ecdsa"
+    ) || name.starts_with(".env.")
+        || name.ends_with(".key")
+        || name.ends_with(".pem")
+}
 
 /// One operator approval or a model-visible denial reason.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -44,14 +66,14 @@ pub type ConfirmTool = Box<dyn Fn(&ToolAction) -> ConfirmResult>;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolPolicy {
     pub root: PathBuf,
-    /// Python default: ``64 * 1024``.
-    pub max_file_bytes: i64,
-    /// Python default: ``200``.
-    pub max_list_entries: i64,
     /// Python default: ``False``.
     pub allow_writes: bool,
     /// Python default: ``()``.
     pub allowed_commands: Vec<Vec<String>>,
+    /// Python default: ``64 * 1024``.
+    pub max_file_bytes: i64,
+    /// Python default: ``200``.
+    pub max_list_entries: i64,
     /// Python default: ``64 * 1024``.
     pub max_write_bytes: i64,
     /// Python default: ``30.0``.
@@ -61,7 +83,6 @@ pub struct ToolPolicy {
 impl ToolPolicy {
     pub const DEFAULT_MAX_FILE_BYTES: i64 = 64 * 1024;
     pub const DEFAULT_MAX_LIST_ENTRIES: i64 = 200;
-    pub const DEFAULT_ALLOW_WRITES: bool = false;
     pub const DEFAULT_MAX_WRITE_BYTES: i64 = 64 * 1024;
     pub const DEFAULT_COMMAND_TIMEOUT_SECONDS: f64 = 30.0;
 
@@ -74,12 +95,12 @@ impl ToolPolicy {
         max_write_bytes: i64,
         command_timeout_seconds: f64,
     ) -> Result<Self, AgentError> {
-        let policy = Self {
+        let mut policy = Self {
             root,
-            max_file_bytes,
-            max_list_entries,
             allow_writes,
             allowed_commands,
+            max_file_bytes,
+            max_list_entries,
             max_write_bytes,
             command_timeout_seconds,
         };
@@ -88,9 +109,34 @@ impl ToolPolicy {
     }
 
     /// Python's ``__post_init__``.
-    pub fn post_init(&self) -> Result<(), AgentError> {
-        // TODO: normalize and validate the root and positive limits.
-        todo!()
+    pub fn post_init(&mut self) -> Result<(), AgentError> {
+        // normalize and validate the root and positive limits.
+        if self.root.is_symlink() {
+            return Err(AgentError("root of workspace must not be symlink".into()));
+        }
+        self.root = self
+            .root
+            .canonicalize()
+            .map_err(|_| AgentError("workspace root does not exist".into()))?;
+        if !self.root.is_dir() {
+            return Err(AgentError("workspace root must be a directoty".into()));
+        }
+
+        if self.max_file_bytes <= 0 {
+            return Err(AgentError("max_file_bytes must be positive".into()));
+        }
+        if self.max_list_entries <= 0 {
+            return Err(AgentError("max_list_entries must be positive".into()));
+        }
+        if self.max_write_bytes <= 0 {
+            return Err(AgentError("max_write_bytes must be positive".into()));
+        }
+        if self.command_timeout_seconds <= 0.0 {
+            return Err(AgentError(
+                "command_timeout_seconds must be positive".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -104,6 +150,8 @@ pub struct Workspace {
     observed: HashMap<String, String>,
     modified: HashSet<String>,
     next_call_number: i64,
+
+    available_tools: HashSet<String>,
 }
 
 impl Workspace {
@@ -112,6 +160,8 @@ impl Workspace {
         confirm_tool: Option<ConfirmTool>,
         receipt_store: ReceiptStore,
     ) -> Self {
+        let available_tools =
+            HashSet::from([LIST_FILES_TOOL_NAME.into(), READ_FILE_TOOL_NAME.into()]);
         Self {
             policy,
             confirm_tool,
@@ -119,32 +169,123 @@ impl Workspace {
             observed: HashMap::new(),
             modified: HashSet::new(),
             next_call_number: 1,
+            available_tools,
         }
     }
 
     /// Return only the tools enabled by this policy.
     pub fn available_tools(&self) -> &HashSet<String> {
-        todo!()
+        &self.available_tools
     }
 
     /// Return the files changed by this workspace in sorted order.
     pub fn modified_files(&self) -> Vec<String> {
-        todo!()
+        self.modified.iter().map(|f| f.clone()).collect::<Vec<_>>()
     }
 
     /// Resolve one relative path without traversal or symlinks.
     pub fn resolve_path(&self, raw: &str, must_exist: bool) -> Result<PathBuf, AgentError> {
-        todo!()
+        if raw.trim().is_empty() || raw.contains('\0') {
+            return Err(AgentError(
+                "path must be non-empty and contain no NUL bytes".into(),
+            ));
+        }
+        let relative = Path::new(raw);
+        if relative.is_absolute() {
+            return Err(AgentError("raw path must be relative".into()));
+        }
+        let inaccessible = |error| AgentError(format!("path is not accessible: {error}"));
+        let mut resolved = self.policy.root.canonicalize().map_err(inaccessible)?;
+        for component in relative.components() {
+            if component == Component::CurDir {
+                continue;
+            }
+
+            let name = component.as_os_str().to_string_lossy().to_string();
+            if is_protected(&name) {
+                return Err(AgentError("raw path is not accessible".into()));
+            }
+
+            resolved.push(component.as_os_str());
+            match fs::symlink_metadata(&resolved) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() {
+                        return Err(AgentError("symlinks are not accessible".into()));
+                    }
+                    resolved = resolved.canonicalize().map_err(inaccessible)?;
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound && !must_exist => {}
+                Err(error) => return Err(inaccessible(error)),
+            }
+        }
+        let relative = resolved
+            .strip_prefix(&self.policy.root)
+            .map_err(|_| AgentError("resolved path is outside the workspace root".into()))?;
+        Ok(resolved)
     }
 
     /// List one directory, bounded by the policy.
     pub fn list_files(&mut self, raw: &str) -> Result<String, AgentError> {
-        todo!()
+        let resolved = self.resolve_path(raw, true)?;
+        if !resolved.is_dir() {
+            return Err(AgentError("path is not a directory".into()));
+        }
+
+        let mut entries = vec![];
+        for e in fs::read_dir(&resolved).map_err(|e| AgentError(e.to_string()))? {
+            let entry = e.map_err(|e| AgentError(e.to_string()))?;
+            let path = entry.path();
+            if path.is_symlink() {
+                continue;
+            }
+            let Some(name) = path
+                .file_name()
+                .and_then(|name| Some(name.to_string_lossy().to_string()))
+            else {
+                continue;
+            };
+            if is_protected(&name) && name.starts_with(".") {
+                continue;
+            }
+            let prefix = if path.is_dir() { "dir " } else { "file " };
+            let relative = path
+                .strip_prefix(&self.policy.root)
+                .map_err(|e| AgentError(e.to_string()))?;
+            entries.push((relative.to_string_lossy().to_string(), prefix));
+        }
+
+        entries.sort();
+        let entries = entries[..entries.len().min(self.policy.max_list_entries as usize)]
+            .iter()
+            .map(|(name, prefix)| {
+                let mut prefix = prefix.to_string();
+                prefix.push_str(name);
+                prefix
+            })
+            .collect::<Vec<_>>();
+
+        let result = entries.join("\n");
+        Ok(if result.trim().is_empty() {
+            "(empty directory)".into()
+        } else {
+            result
+        })
     }
 
     /// Read one bounded UTF-8 regular file.
     pub fn read_file(&mut self, raw: &str) -> Result<String, AgentError> {
-        todo!()
+        let resolved = self.resolve_path(raw, true)?;
+        let metadata = resolved.metadata().map_err(|e| AgentError(e.to_string()))?;
+        if metadata.is_dir() {
+            return Err(AgentError("read_file path must be a regular file".into()));
+        }
+        if metadata.size() >= self.policy.max_file_bytes as u64 {
+            return Err(AgentError(format!(
+                "exceeds {} bytes",
+                self.policy.max_file_bytes
+            )));
+        }
+        fs::read_to_string(resolved).map_err(|e| AgentError(format!("invalid UTF-8: {}", e)))
     }
 
     /// Atomically create a file or replace one previously read unchanged.
@@ -163,12 +304,30 @@ impl Workspace {
     }
 
     /// Dispatch one action, approving and receipting effects once.
-    pub fn execute(
-        &mut self,
-        action: &ToolAction,
-        tool_call_id: Option<&str>,
-    ) -> Result<String, AgentError> {
-        todo!()
+    pub fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
+        let result = match action.tool.as_str() {
+            "list_files" => {
+                let path = action
+                    .arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
+                self.list_files(path)
+            }
+            "read_file" => {
+                if let Some(path) = action.arguments.get("path").and_then(|v| v.as_str()) {
+                    self.read_file(path)
+                } else {
+                    Err(AgentError(
+                        "missing path argument for read_file tool".into(),
+                    ))
+                }
+            }
+            tool => {
+                Err(AgentError(format!("tool is not enabled: {}", tool)))
+            }
+        };
+        result.unwrap_or_else(|e| format!("error: {}", e.to_string()))
     }
 }
 
@@ -189,7 +348,7 @@ impl AgentWorkspace for Workspace {
         &mut self,
         action: &ToolAction,
         tool_call_id: Option<&str>,
-    ) -> Result<String, AgentError> {
+    ) -> String {
         Workspace::execute(self, action, tool_call_id)
     }
 }

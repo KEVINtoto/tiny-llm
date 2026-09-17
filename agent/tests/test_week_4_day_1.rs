@@ -2,6 +2,9 @@
 
 //! Rust equivalents of `tests_refsol/test_week_4_day_1.py`.
 
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -84,9 +87,9 @@ impl AgentWorkspace for FakeWorkspace {
         &mut self,
         action: &ToolAction,
         _tool_call_id: Option<&str>,
-    ) -> Result<String, AgentError> {
+    ) -> String {
         self.executed.push(action.clone());
-        Ok("README contents".to_owned())
+        "README contents".to_owned()
     }
 }
 
@@ -142,7 +145,7 @@ fn test_task_1_rejects_an_empty_task() {
 
 #[test]
 fn test_task_2_executes_a_tool_appends_its_result_and_finishes() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = scripted_responses(&[
         r#"{"tool":"read_file","path":"README.md"}"#,
         r#"{"final":"inspected README"}"#,
@@ -168,7 +171,7 @@ fn test_task_2_executes_a_tool_appends_its_result_and_finishes() {
 
 #[test]
 fn test_task_3_returns_invalid_and_unknown_actions_to_the_model() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = scripted_responses(&[
         "not json",
         r#"{"tool":"run_shell","argv":["rm","-rf","."]}"#,
@@ -201,7 +204,7 @@ fn test_task_3_returns_invalid_and_unknown_actions_to_the_model() {
 
 #[test]
 fn test_task_4_stops_at_the_step_budget() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate =
         |_messages: &[Message]| r#"{"tool":"read_file","path":"README.md"}"#.to_owned();
     let run_limits = limits(2, 48_000, 3, 3);
@@ -223,7 +226,7 @@ fn test_task_4_stops_at_the_step_budget() {
 
 #[test]
 fn test_task_5_agent_observes_then_finishes() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = scripted_responses(&[
         r#"{"tool":"read_file","path":"README.md"}"#,
         r#"{"final":"inspected README"}"#,
@@ -246,7 +249,7 @@ fn test_task_5_agent_observes_then_finishes() {
 
 #[test]
 fn test_task_6_agent_recovers_from_invalid_json() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = scripted_responses(&["not json", r#"{"final":"recovered"}"#]);
 
     let result = run_agent(
@@ -270,7 +273,7 @@ fn test_task_6_agent_recovers_from_invalid_json() {
 
 #[test]
 fn test_task_7_agent_stops_repeated_actions() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = scripted_responses(&[
         r#"{"tool":"read_file","path":"README.md"}"#,
         r#"{"tool":"read_file","path":"README.md"}"#,
@@ -292,7 +295,7 @@ fn test_task_7_agent_stops_repeated_actions() {
 }
 
 fn assert_exact_observation_payload() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let seen = RefCell::new(Vec::<Vec<Message>>::new());
     let mut generate = |messages: &[Message]| {
         let mut seen = seen.borrow_mut();
@@ -321,7 +324,7 @@ fn test_task_8_observation_propagation() {
 
 #[test]
 fn test_task_8_known_but_disabled_tool_is_rejected() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = scripted_responses(&[
         r#"{"tool":"write_file","path":"x","content":"y"}"#,
         r#"{"final":"recovered"}"#,
@@ -351,7 +354,7 @@ fn test_task_9_positive_limit_fails_closed() {
 
 #[test]
 fn test_task_9_context_limit_stops_the_loop() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate =
         |_messages: &[Message]| r#"{"tool":"read_file","path":"README.md"}"#.to_owned();
     let run_limits = limits(3, 10, 3, 2);
@@ -371,7 +374,7 @@ fn test_task_9_context_limit_stops_the_loop() {
 
 #[test]
 fn test_task_9_invalid_action_limit_stops_the_loop() {
-    let mut workspace = FakeWorkspace::new("/tmp");
+    let mut workspace = FakeWorkspace::new(test_temp::root().to_str().unwrap());
     let mut generate = |_messages: &[Message]| "not json".to_owned();
     let run_limits = limits(5, 48_000, 2, 2);
 

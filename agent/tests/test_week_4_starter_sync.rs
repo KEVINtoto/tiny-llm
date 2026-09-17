@@ -3,6 +3,9 @@
 //! Rust declarations are checked with syn, rather than identifier substrings.
 //! The supplied CLI and capstone are still Python files; their static guards
 //! inspect those actual artifacts. No Python reference implementation is run.
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -10,7 +13,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use syn::parse::Parser;
 use syn::{ImplItem, Item, Visibility};
-use tempfile::tempdir;
+use test_temp::tempdir;
 use tiny_llm_agent::generation::Message;
 use tiny_llm_agent::workspace::ConfirmResult;
 use tiny_llm_agent::{
@@ -611,7 +614,7 @@ fn test_real_model_cli_discloses_command_side_effect_scope() {
             .unwrap()
             .clone(),
     };
-    let result = workspace.execute(&action, None).unwrap();
+    let result = workspace.execute(&action, None);
     assert!(temp.path().join("extra").is_file());
     assert!(result.starts_with("status: 0"));
     assert!(workspace.modified_files().is_empty());

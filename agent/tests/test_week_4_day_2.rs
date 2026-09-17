@@ -2,6 +2,9 @@
 
 //! Rust equivalents of `tests_refsol/test_week_4_day_2.py`.
 
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
@@ -29,7 +32,7 @@ impl TestDirectory {
             .duration_since(UNIX_EPOCH)
             .expect("system clock must be after the Unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
+        let path = test_temp::root().join(format!(
             "tiny-llm-week4-day2-{}-{nanos}-{sequence}",
             std::process::id()
         ));
@@ -263,22 +266,19 @@ fn test_task_6_dispatch_returns_recoverable_observations() {
             .execute(
                 &tool_action("read_file", json!({"path": "README.md"})),
                 None,
-            )
-            .unwrap(),
+            ),
         "hello"
     );
     let missing = workspace
         .execute(
             &tool_action("read_file", json!({"path": "missing.md"})),
             None,
-        )
-        .unwrap();
+        );
     let disabled = workspace
         .execute(
             &tool_action("write_file", json!({"path": "x", "content": "y"})),
             None,
-        )
-        .unwrap();
+        );
     assert!(missing.starts_with("error:"));
     assert_eq!(disabled, "error: tool is not enabled: write_file");
 }

@@ -2,6 +2,9 @@
 
 //! Rust equivalents of `tests_refsol/test_week_4_day_3.py`.
 
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
@@ -28,7 +31,7 @@ impl TestDirectory {
             .duration_since(UNIX_EPOCH)
             .expect("system clock must be after the Unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
+        let path = test_temp::root().join(format!(
             "tiny-llm-week4-day3-{}-{nanos}-{sequence}",
             std::process::id()
         ));
@@ -196,7 +199,6 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
     assert!(
         workspace
             .execute(&edit, None)
-            .unwrap()
             .contains("read the existing file")
     );
     assert!(approvals.borrow().is_empty());
@@ -204,7 +206,6 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
     assert!(
         workspace
             .execute(&edit, None)
-            .unwrap()
             .contains("operator denied")
     );
     assert_eq!(approvals.borrow().len(), 1);
@@ -234,8 +235,7 @@ fn test_task_3_rechecks_stale_bytes_after_approval() {
                 json!({"path": "app.py", "old": "1", "new": "2"}),
             ),
             None,
-        )
-        .unwrap();
+        );
 
     assert_eq!(result, "error: file changed since it was read");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 9\n");
@@ -265,8 +265,7 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
                 json!({"path": "./app.py", "old": "1", "new": "2"}),
             ),
             Some("edit-1"),
-        )
-        .unwrap();
+        );
 
     assert_eq!(result, "edited app.py");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 2\n");
@@ -305,7 +304,7 @@ fn test_task_5_write_creates_new_files_but_observes_existing_files() {
     let create = tool_action("write_file", json!({"path": "new.txt", "content": "new\n"}));
 
     assert_eq!(
-        workspace.execute(&create, Some("write-new")).unwrap(),
+        workspace.execute(&create, Some("write-new")),
         "wrote new.txt"
     );
     assert_eq!(
@@ -325,11 +324,10 @@ fn test_task_5_write_creates_new_files_but_observes_existing_files() {
     assert!(
         other
             .execute(&overwrite, None)
-            .unwrap()
             .contains("read the existing file")
     );
     other.read_file("new.txt").unwrap();
-    assert_eq!(other.execute(&overwrite, None).unwrap(), "wrote new.txt");
+    assert_eq!(other.execute(&overwrite, None), "wrote new.txt");
 }
 
 #[test]
@@ -352,8 +350,7 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
         .execute(
             &tool_action("run_command", json!({"argv": ["echo", "no"]})),
             None,
-        )
-        .unwrap();
+        );
     let nul_denied = workspace
         .execute(
             &tool_action(
@@ -361,14 +358,12 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
                 json!({"argv": ["/bin/sh", "bad\u{0}argument"]}),
             ),
             None,
-        )
-        .unwrap();
+        );
     let result = workspace
         .execute(
             &tool_action("run_command", json!({"argv": allowed})),
             Some("validate-1"),
-        )
-        .unwrap();
+        );
     let receipt = workspace.receipt_store.get("validate-1").unwrap();
 
     assert_eq!(denied, "error: command is not allowed");
@@ -404,8 +399,8 @@ fn test_task_7_duplicate_call_ids_do_not_repeat_an_effect() {
     );
     let action = tool_action("run_command", json!({"argv": allowed}));
 
-    let first = workspace.execute(&action, Some("same-call")).unwrap();
-    let second = workspace.execute(&action, Some("same-call")).unwrap();
+    let first = workspace.execute(&action, Some("same-call"));
+    let second = workspace.execute(&action, Some("same-call"));
 
     assert_eq!(first, "status: 0\noutput:\npass\n");
     assert_eq!(second, first);
@@ -418,8 +413,7 @@ fn test_task_7_duplicate_call_ids_do_not_repeat_an_effect() {
         .execute(
             &tool_action("run_command", json!({"argv": ["different"]})),
             Some("same-call"),
-        )
-        .unwrap();
+        );
     assert!(conflict.contains("already used"));
 }
 

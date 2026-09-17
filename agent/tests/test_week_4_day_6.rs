@@ -2,6 +2,9 @@
 
 //! Week 4 Day 6 inspect-and-steer course-code tests.
 
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -9,7 +12,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use serde_json::json;
-use tempfile::tempdir;
+use test_temp::tempdir;
 use tiny_llm_agent::generation::{Generate, Message};
 use tiny_llm_agent::protocol::AgentError;
 use tiny_llm_agent::workspace::{ConfirmResult, ConfirmTool};

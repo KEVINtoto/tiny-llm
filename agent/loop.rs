@@ -188,7 +188,6 @@ pub fn run_agent(
                 event.result = Some(
                     workspace
                         .execute(tool_action, None)
-                        .unwrap_or_else(|e| format!("error: {}", e)),
                 );
                 // messages = append_tool_result(&messages, &event.response, event.result.as_ref().unwrap());
             }
@@ -199,6 +198,10 @@ pub fn run_agent(
                 // break;
             }
             _ => {}
+        }
+
+        if let Some(on_event) = on_event {
+            on_event(&event);
         }
 
         if let Some(result) = &event.result {
@@ -218,6 +221,8 @@ pub fn run_agent(
 
         steps += 1;
     }
+
+    // run.modified_files = workspace.modified_files();
 
     Ok(run)
 }

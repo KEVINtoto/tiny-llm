@@ -86,7 +86,7 @@ impl ReceiptStore {
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
         // TODO: load and verify an existing JSONL log.
-        todo!()
+        Ok(())
     }
 
     /// Record one call id once; identical retries are idempotent.

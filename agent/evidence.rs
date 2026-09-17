@@ -142,7 +142,7 @@ impl BoundedEvidenceWorkspace {
         &mut self,
         action: &ToolAction,
         tool_call_id: Option<&str>,
-    ) -> Result<String, AgentError> {
+    ) -> String {
         todo!()
     }
 }
@@ -164,7 +164,7 @@ impl AgentWorkspace for BoundedEvidenceWorkspace {
         &mut self,
         action: &ToolAction,
         tool_call_id: Option<&str>,
-    ) -> Result<String, AgentError> {
+    ) -> String {
         BoundedEvidenceWorkspace::execute(self, action, tool_call_id)
     }
 }

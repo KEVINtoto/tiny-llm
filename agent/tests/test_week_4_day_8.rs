@@ -2,6 +2,9 @@
 
 //! Rust port of the Week 4 Day 8 cached-fork, steering, and selection tests.
 
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,7 +32,7 @@ impl TestDir {
     fn new(label: &str) -> Self {
         let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
         let path =
-            std::env::temp_dir().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
+            test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
         fs::create_dir(&path).expect("create isolated test directory");
         Self(path)
     }
@@ -365,8 +368,8 @@ fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
                 json!({"path": "app.py", "old": "2", "new": "3"}),
             ),
             None,
-        )
-        .expect("denial remains model-visible");
+        );
+        // .expect("denial remains model-visible");
 
     assert_eq!(
         result,
@@ -400,8 +403,8 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
                     json!({"path": "app.py", "old": "1", "new": "2"}),
                 ),
                 None,
-            )
-            .expect("execute allowed edit"),
+            ),
+            // .expect("execute allowed edit"),
         "edited app.py"
     );
 
@@ -419,8 +422,8 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
                     json!({"path": "app.py", "old": "2", "new": "3"}),
                 ),
                 None,
-            )
-            .expect("execute denied edit"),
+            ),
+            // .expect("execute denied edit"),
         "error: operator denied the tool action"
     );
 }

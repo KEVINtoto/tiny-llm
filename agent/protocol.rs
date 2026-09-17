@@ -66,16 +66,19 @@ pub trait AgentWorkspace {
         &mut self,
         action: &ToolAction,
         tool_call_id: Option<&str>,
-    ) -> Result<String, AgentError>;
+    ) -> String;
 }
+
+pub static LIST_FILES_TOOL_NAME: &'static str = "list_files";
+pub static READ_FILE_TOOL_NAME: &'static str = "read_file";
 
 /// Required and optional argument names for every Day 1 tool.
 pub static TOOL_FIELDS: LazyLock<
     HashMap<&'static str, (HashSet<&'static str>, HashSet<&'static str>)>,
 > = LazyLock::new(|| {
     HashMap::from([
-        ("list_files", (HashSet::new(), HashSet::from(["path"]))),
-        ("read_file", (HashSet::from(["path"]), HashSet::new())),
+        (LIST_FILES_TOOL_NAME, (HashSet::new(), HashSet::from(["path"]))),
+        (READ_FILE_TOOL_NAME, (HashSet::from(["path"]), HashSet::new())),
         (
             "write_file",
             (HashSet::from(["path", "content"]), HashSet::new()),
@@ -190,8 +193,11 @@ pub fn build_system_prompt(workspace: &dyn AgentWorkspace) -> String {
 
     let tools = workspace.available_tools();
 
+    if tools.contains(LIST_FILES_TOOL_NAME) {
+        lines.push(r#"{"tool":"list_files","path":"."}"#);
+    }
     if tools.contains("read_file") {
-        lines.push(r#"{"tool":"read_file","path":"README.md"}"#)
+        lines.push(r#"{"tool":"read_file","path":"README.md"}"#);
     }
 
     lines.join("\n")

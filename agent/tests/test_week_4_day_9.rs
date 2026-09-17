@@ -5,6 +5,9 @@
 #[path = "support/capstone.rs"]
 mod capstone;
 
+#[path = "support/temp.rs"]
+mod test_temp;
+
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,7 +29,7 @@ impl TestDir {
     fn new(label: &str) -> Self {
         let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
         let path =
-            std::env::temp_dir().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
+            test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
         fs::create_dir(&path).expect("create isolated test directory");
         Self(path)
     }
@@ -194,7 +197,7 @@ fn test_task_0_supplied_capstone_composes_the_completed_active_package() {
         artifact["range_byte_count"].as_u64().unwrap()
     );
 
-    let temporary = tempfile::tempdir().unwrap();
+    let temporary = test_temp::tempdir().unwrap();
     let executable = std::env::current_exe().unwrap();
     let mut records = Vec::new();
     for name in ["first-executable-path", "second-executable-path"] {
@@ -294,8 +297,8 @@ fn test_task_2_oversized_result_becomes_bounded_verifiable_observation() {
     let mut bounded = bounded_workspace(&temp, "ascii", &content, 512, 8, 24);
 
     let observation = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize oversized result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize oversized result");
     let observed = payload(&observation, "Tool result externalized:\n");
 
     let data = content.as_bytes();
@@ -335,8 +338,8 @@ fn test_task_2_oversized_result_becomes_bounded_verifiable_observation() {
     let unicode_content = format!("αβγ{}δεζ", "x".repeat(1_000));
     let mut unicode = bounded_workspace(&temp, "unicode", &unicode_content, 512, 5, 24);
     let rendered = unicode
-        .execute(&read_action("build.log"), None)
-        .expect("externalize unicode result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize unicode result");
     let observed = payload(&rendered, "Tool result externalized:\n");
     assert!(
         !observed["head_preview"]
@@ -359,16 +362,16 @@ fn test_task_2_externalization_uses_utf8_bytes_at_the_exact_inline_boundary() {
     let mut inline = default_bounded(&temp, "inline", &"a".repeat(512));
     assert_eq!(
         inline
-            .execute(&read_action("build.log"), None)
-            .expect("read inline result"),
+            .execute(&read_action("build.log"), None),
+            // .expect("read inline result"),
         "a".repeat(512)
     );
 
     let content = "é".repeat(512);
     let mut multibyte = default_bounded(&temp, "multibyte", &content);
     let result = multibyte
-        .execute(&read_action("build.log"), None)
-        .expect("externalize multibyte result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize multibyte result");
     let observed = payload(&result, "Tool result externalized:\n");
     assert_eq!(observed["byte_count"], 1_024);
     assert_eq!(content.len(), 1_024);
@@ -379,8 +382,8 @@ fn test_task_2_inline_cap_plus_one_byte_is_externalized() {
     let temp = TestDir::new("day9-cap-plus-one");
     let mut bounded = default_bounded(&temp, "cap", &"a".repeat(513));
     let result = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize cap plus one");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize cap plus one");
     assert!(result.starts_with("Tool result externalized:\n"));
 }
 
@@ -389,8 +392,8 @@ fn test_task_2_four_byte_unicode_bounds_the_whole_encoded_observation() {
     let temp = TestDir::new("day9-four-byte-bound");
     let mut bounded = bounded_workspace(&temp, "emoji", &"🙂".repeat(300), 512, 80, 512);
     let result = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize emoji result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize emoji result");
     assert!(
         result.len() <= 512,
         "bound is measured in encoded UTF-8 bytes"
@@ -403,8 +406,8 @@ fn test_task_2_four_byte_unicode_preview_ranges_are_byte_accurate() {
     let content = "🙂".repeat(300);
     let mut bounded = bounded_workspace(&temp, "emoji", &content, 512, 80, 512);
     let result = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize emoji result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize emoji result");
     let observed = payload(&result, "Tool result externalized:\n");
 
     let head_end = observed["head_range"][1].as_u64().unwrap() as usize;
@@ -423,8 +426,8 @@ fn test_task_3_explicit_virtual_read_returns_only_the_bound_range() {
     let content = "0123456789".repeat(100);
     let mut bounded = bounded_workspace(&temp, "range", &content, 512, 5, 32);
     let first = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize result");
     let identity = payload(&first, "Tool result externalized:\n");
     let path = bounded
         .artifacts
@@ -432,8 +435,8 @@ fn test_task_3_explicit_virtual_read_returns_only_the_bound_range() {
         .expect("range path");
 
     let result = bounded
-        .execute(&read_action(&path), None)
-        .expect("read range");
+        .execute(&read_action(&path), None);
+        // .expect("read range");
     let observed = payload(&result, "Artifact range:\n");
 
     assert_eq!(
@@ -458,16 +461,16 @@ fn test_task_3_selected_unicode_byte_count_is_not_a_character_count() {
     let content = "€".repeat(300);
     let mut bounded = default_bounded(&temp, "unicode", &content);
     let first = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize result");
     let identity = payload(&first, "Tool result externalized:\n");
     let path = bounded
         .artifacts
         .range_path(identity["artifact_id"].as_str().unwrap(), 0, 510)
         .expect("range path");
     let result = bounded
-        .execute(&read_action(&path), None)
-        .expect("read unicode range");
+        .execute(&read_action(&path), None);
+        // .expect("read unicode range");
     let observed = payload(&result, "Artifact range:\n");
     assert_eq!(observed["byte_count"], 510);
     assert_eq!(observed["data"].as_str().unwrap().chars().count(), 170);
@@ -479,14 +482,14 @@ fn test_task_3_advertised_unicode_range_is_aligned_and_runnable() {
     let content = "€".repeat(300);
     let mut bounded = default_bounded(&temp, "unicode", &content);
     let first = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize result");
     let identity = payload(&first, "Tool result externalized:\n");
     let advertised = identity["range_request"]["path"].as_str().unwrap();
     assert!(advertised.ends_with("/bytes/0-510"));
     let result = bounded
-        .execute(&read_action(advertised), None)
-        .expect("execute advertised range");
+        .execute(&read_action(advertised), None);
+        // .expect("execute advertised range");
     let observed = payload(&result, "Artifact range:\n");
     assert_eq!(observed["start"], 0);
     assert_eq!(observed["end"], 510);
@@ -524,14 +527,14 @@ fn test_task_3_four_byte_range_cap_is_advertised_and_runnable() {
     let temp = TestDir::new("day9-four-byte-cap");
     let mut bounded = bounded_workspace(&temp, "emoji", &"🙂".repeat(130), 512, 64, 4);
     let first = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("externalize result");
+        .execute(&read_action("build.log"), None);
+        // .expect("externalize result");
     let identity = payload(&first, "Tool result externalized:\n");
     let advertised = identity["range_request"]["path"].as_str().unwrap();
     assert!(advertised.ends_with("/bytes/0-4"));
     let result = bounded
-        .execute(&read_action(advertised), None)
-        .expect("read one emoji");
+        .execute(&read_action(advertised), None);
+        // .expect("read one emoji");
     let observed = payload(&result, "Artifact range:\n");
     assert_eq!(observed["start"], 0);
     assert_eq!(observed["end"], 4);
@@ -552,8 +555,8 @@ fn test_task_3_four_byte_cap_still_rejects_a_supplied_misaligned_range() {
         .range_path(&record.artifact_id, 0, 3)
         .expect("range path");
     let result = bounded
-        .execute(&read_action(&misaligned), None)
-        .expect("misalignment is model-visible");
+        .execute(&read_action(&misaligned), None);
+        // .expect("misalignment is model-visible");
     assert_eq!(result, "error: artifact range does not align to UTF-8 text");
 }
 
@@ -580,8 +583,8 @@ fn test_task_4_range_failures_are_ordinary_and_do_not_fall_through() {
         fs::write(&learner_path, b"learner-secret").expect("write fall-through secret");
 
         let result = bounded
-            .execute(&read_action(&path), None)
-            .expect("range failure is model-visible");
+            .execute(&read_action(&path), None);
+            // .expect("range failure is model-visible");
         assert!(result.starts_with("error: "));
         assert!(result.contains(message), "{path}: {result}");
         assert!(!result.contains("short"));
@@ -599,8 +602,8 @@ fn test_task_4_oversized_decimal_bounds_are_ordinary_and_do_not_fall_through() {
         let bound = template.replace("{digits}", &digits);
         let path = format!(".tool-artifacts/{}/bytes/{bound}", record.artifact_id);
         let result = bounded
-            .execute(&read_action(&path), None)
-            .expect("oversized bound is model-visible");
+            .execute(&read_action(&path), None);
+            // .expect("oversized bound is model-visible");
         assert_eq!(result, "error: artifact range path is malformed");
     }
 }
@@ -634,8 +637,8 @@ fn test_task_4_unknown_store_and_tampering_do_not_leak_artifacts() {
     )
     .unwrap();
     let missing = unrelated
-        .execute(&read_action(&path), None)
-        .expect("unknown artifact is model-visible");
+        .execute(&read_action(&path), None);
+        // .expect("unknown artifact is model-visible");
     assert_eq!(missing, "error: artifact is not available in this store");
     assert!(!missing.contains(&record.artifact_id));
     assert!(!missing.contains("classified"));
@@ -646,8 +649,8 @@ fn test_task_4_unknown_store_and_tampering_do_not_leak_artifacts() {
         .range_path(&unicode_record.artifact_id, 1, 3)
         .expect("range path");
     let split = bounded
-        .execute(&read_action(&split_path), None)
-        .expect("misalignment is model-visible");
+        .execute(&read_action(&split_path), None);
+        // .expect("misalignment is model-visible");
     assert_eq!(split, "error: artifact range does not align to UTF-8 text");
 
     fs::write(
@@ -656,8 +659,8 @@ fn test_task_4_unknown_store_and_tampering_do_not_leak_artifacts() {
     )
     .expect("tamper artifact");
     let tampered = bounded
-        .execute(&read_action(&path), None)
-        .expect("tampering is model-visible");
+        .execute(&read_action(&path), None);
+        // .expect("tampering is model-visible");
     assert_eq!(
         tampered,
         "error: artifact digest does not match its recorded identity"
@@ -678,8 +681,8 @@ fn test_task_4_range_cap_plus_one_is_rejected() {
         .range_path(&record.artifact_id, 0, 17)
         .expect("range path");
     let result = bounded
-        .execute(&read_action(&path), None)
-        .expect("cap failure is model-visible");
+        .execute(&read_action(&path), None);
+        // .expect("cap failure is model-visible");
     assert_eq!(result, "error: artifact range exceeds 16 bytes");
 }
 
@@ -762,8 +765,8 @@ fn test_task_6_small_and_error_results_remain_inline_and_state_is_delegated() {
     let temp = TestDir::new("day9-inline-delegation");
     let mut bounded = bounded_workspace(&temp, "small", "small result\n", 512, 8, 16);
     let result = bounded
-        .execute(&read_action("build.log"), None)
-        .expect("read small result");
+        .execute(&read_action("build.log"), None);
+        // .expect("read small result");
     assert_eq!(result, "small result\n");
     assert!(std::ptr::eq(bounded.policy(), &bounded.workspace.policy));
     assert_eq!(
@@ -782,8 +785,8 @@ fn test_task_6_small_and_error_results_remain_inline_and_state_is_delegated() {
     // tool name produces the same oversized `error:` delegation case.
     let long_tool = format!("missing-{}", "x".repeat(1_000));
     let long_error = bounded
-        .execute(&action(&long_tool, json!({})), None)
-        .expect("workspace error is model-visible");
+        .execute(&action(&long_tool, json!({})), None);
+        // .expect("workspace error is model-visible");
     assert!(long_error.starts_with("error:"));
     assert!(long_error.len() > 512);
     assert_eq!(
