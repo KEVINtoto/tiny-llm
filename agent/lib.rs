@@ -14,14 +14,16 @@ pub mod compaction;
 pub mod evaluation;
 pub mod evidence;
 pub mod generation;
-pub mod model_service;
 pub mod r#loop;
+pub mod model_service;
 pub mod protocol;
 pub mod receipts;
 pub mod steering;
 pub mod workspace;
 
-pub use crate::branching::{BranchOutcome, KvPrefixGenerator, PrefixReuse, run_branch, select_branch};
+pub use crate::branching::{
+    BranchOutcome, KvPrefixGenerator, PrefixReuse, run_branch, select_branch,
+};
 pub use crate::checkpoint::{AgentCheckpoint, ModelCheckpoint, create_checkpoint};
 pub use crate::compaction::{CompactionResult, compact_completed_interactions};
 pub use crate::evaluation::{
@@ -30,10 +32,10 @@ pub use crate::evaluation::{
 };
 pub use crate::evidence::{ArtifactRef, ArtifactStore, BoundedEvidenceWorkspace};
 pub use crate::generation::{generate_response, initial_messages};
-pub use crate::protocol::{AgentError, FinalAction, ToolAction, build_system_prompt, parse_action};
 pub use crate::r#loop::{
     AgentEvent, AgentLimits, AgentRun, resume_agent, run_agent, run_to_checkpoint,
 };
+pub use crate::protocol::{AgentError, FinalAction, ToolAction, build_system_prompt, parse_action};
 pub use crate::receipts::{EffectReceipt, ReceiptStore};
 pub use crate::steering::{AgentStatus, inspect_checkpoint, resume_with_steering};
 pub use crate::workspace::{ApprovalDecision, ToolPolicy, Workspace};

@@ -147,13 +147,7 @@ pub fn generate_response(
 
     let mut caches = cache_factory();
 
-    let result = generate_response_inner(
-        model,
-        tokenizer,
-        tokens,
-        &mut caches,
-        max_tokens,
-    );
+    let result = generate_response_inner(model, tokenizer, tokens, &mut caches, max_tokens);
 
     for cache in caches.iter_mut() {
         cache.release();

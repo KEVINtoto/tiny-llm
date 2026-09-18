@@ -203,11 +203,7 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
     );
     assert!(approvals.borrow().is_empty());
     assert_eq!(workspace.read_file("app.py").unwrap(), "answer = 1\n");
-    assert!(
-        workspace
-            .execute(&edit, None)
-            .contains("operator denied")
-    );
+    assert!(workspace.execute(&edit, None).contains("operator denied"));
     assert_eq!(approvals.borrow().len(), 1);
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 1\n");
     assert!(workspace.receipt_store.get("call-1").is_none());
@@ -228,14 +224,13 @@ fn test_task_3_rechecks_stale_bytes_after_approval() {
         memory_store(),
     );
     workspace.read_file("app.py").unwrap();
-    let result = workspace
-        .execute(
-            &tool_action(
-                "edit_file",
-                json!({"path": "app.py", "old": "1", "new": "2"}),
-            ),
-            None,
-        );
+    let result = workspace.execute(
+        &tool_action(
+            "edit_file",
+            json!({"path": "app.py", "old": "1", "new": "2"}),
+        ),
+        None,
+    );
 
     assert_eq!(result, "error: file changed since it was read");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 9\n");
@@ -258,14 +253,13 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
         store,
     );
     workspace.read_file("app.py").unwrap();
-    let result = workspace
-        .execute(
-            &tool_action(
-                "edit_file",
-                json!({"path": "./app.py", "old": "1", "new": "2"}),
-            ),
-            Some("edit-1"),
-        );
+    let result = workspace.execute(
+        &tool_action(
+            "edit_file",
+            json!({"path": "./app.py", "old": "1", "new": "2"}),
+        ),
+        Some("edit-1"),
+    );
 
     assert_eq!(result, "edited app.py");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 2\n");
@@ -346,24 +340,21 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
         store,
     );
 
-    let denied = workspace
-        .execute(
-            &tool_action("run_command", json!({"argv": ["echo", "no"]})),
-            None,
-        );
-    let nul_denied = workspace
-        .execute(
-            &tool_action(
-                "run_command",
-                json!({"argv": ["/bin/sh", "bad\u{0}argument"]}),
-            ),
-            None,
-        );
-    let result = workspace
-        .execute(
-            &tool_action("run_command", json!({"argv": allowed})),
-            Some("validate-1"),
-        );
+    let denied = workspace.execute(
+        &tool_action("run_command", json!({"argv": ["echo", "no"]})),
+        None,
+    );
+    let nul_denied = workspace.execute(
+        &tool_action(
+            "run_command",
+            json!({"argv": ["/bin/sh", "bad\u{0}argument"]}),
+        ),
+        None,
+    );
+    let result = workspace.execute(
+        &tool_action("run_command", json!({"argv": allowed})),
+        Some("validate-1"),
+    );
     let receipt = workspace.receipt_store.get("validate-1").unwrap();
 
     assert_eq!(denied, "error: command is not allowed");
@@ -409,11 +400,10 @@ fn test_task_7_duplicate_call_ids_do_not_repeat_an_effect() {
         "x",
         "an idempotent retry must not execute the command again"
     );
-    let conflict = workspace
-        .execute(
-            &tool_action("run_command", json!({"argv": ["different"]})),
-            Some("same-call"),
-        );
+    let conflict = workspace.execute(
+        &tool_action("run_command", json!({"argv": ["different"]})),
+        Some("same-call"),
+    );
     assert!(conflict.contains("already used"));
 }
 

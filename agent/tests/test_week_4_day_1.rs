@@ -83,11 +83,7 @@ impl AgentWorkspace for FakeWorkspace {
         Vec::new()
     }
 
-    fn execute(
-        &mut self,
-        action: &ToolAction,
-        _tool_call_id: Option<&str>,
-    ) -> String {
+    fn execute(&mut self, action: &ToolAction, _tool_call_id: Option<&str>) -> String {
         self.executed.push(action.clone());
         "README contents".to_owned()
     }

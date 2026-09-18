@@ -77,6 +77,7 @@ impl KvPrefixGenerator {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Resume, evaluate, and retain the reuse facts for one isolated branch.
 pub fn run_branch(
     name: &str,

@@ -71,7 +71,12 @@ impl ArtifactStore {
     }
 
     /// Return the virtual read_file path for one explicit byte range.
-    pub fn range_path(&self, artifact_id: &str, start: i64, end: i64) -> Result<String, AgentError> {
+    pub fn range_path(
+        &self,
+        artifact_id: &str,
+        start: i64,
+        end: i64,
+    ) -> Result<String, AgentError> {
         todo!()
     }
 }
@@ -138,11 +143,7 @@ impl BoundedEvidenceWorkspace {
     }
 
     /// Execute normally, externalizing only oversized model observations.
-    pub fn execute(
-        &mut self,
-        action: &ToolAction,
-        tool_call_id: Option<&str>,
-    ) -> String {
+    pub fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
         todo!()
     }
 }
@@ -160,11 +161,7 @@ impl AgentWorkspace for BoundedEvidenceWorkspace {
         BoundedEvidenceWorkspace::modified_files(self)
     }
 
-    fn execute(
-        &mut self,
-        action: &ToolAction,
-        tool_call_id: Option<&str>,
-    ) -> String {
+    fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
         BoundedEvidenceWorkspace::execute(self, action, tool_call_id)
     }
 }

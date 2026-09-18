@@ -62,23 +62,24 @@ pub trait AgentWorkspace {
     fn modified_files(&self) -> Vec<String>;
 
     /// Dispatch one action and return its model-visible result.
-    fn execute(
-        &mut self,
-        action: &ToolAction,
-        tool_call_id: Option<&str>,
-    ) -> String;
+    fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String;
 }
 
-pub static LIST_FILES_TOOL_NAME: &'static str = "list_files";
-pub static READ_FILE_TOOL_NAME: &'static str = "read_file";
+pub static LIST_FILES_TOOL_NAME: &str = "list_files";
+pub static READ_FILE_TOOL_NAME: &str = "read_file";
 
 /// Required and optional argument names for every Day 1 tool.
-pub static TOOL_FIELDS: LazyLock<
-    HashMap<&'static str, (HashSet<&'static str>, HashSet<&'static str>)>,
-> = LazyLock::new(|| {
+type ToolFieldMap = HashMap<&'static str, (HashSet<&'static str>, HashSet<&'static str>)>;
+pub static TOOL_FIELDS: LazyLock<ToolFieldMap> = LazyLock::new(|| {
     HashMap::from([
-        (LIST_FILES_TOOL_NAME, (HashSet::new(), HashSet::from(["path"]))),
-        (READ_FILE_TOOL_NAME, (HashSet::from(["path"]), HashSet::new())),
+        (
+            LIST_FILES_TOOL_NAME,
+            (HashSet::new(), HashSet::from(["path"])),
+        ),
+        (
+            READ_FILE_TOOL_NAME,
+            (HashSet::from(["path"]), HashSet::new()),
+        ),
         (
             "write_file",
             (HashSet::from(["path", "content"]), HashSet::new()),
@@ -112,7 +113,7 @@ fn parse_tool_action(
     let missing_required = required
         .iter()
         .filter(|&field| tool_value.get(*field).is_none())
-        .map(|s| *s)
+        .copied()
         .collect::<Vec<_>>();
     let extra = tool_value
         .keys()
@@ -121,7 +122,7 @@ fn parse_tool_action(
         })
         .map(|s| s.as_str())
         .collect::<Vec<_>>();
-    
+
     if !missing_required.is_empty() {
         return Err(AgentError(format!(
             "missing fields for {}: {}",

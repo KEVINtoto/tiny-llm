@@ -180,7 +180,7 @@ impl Workspace {
 
     /// Return the files changed by this workspace in sorted order.
     pub fn modified_files(&self) -> Vec<String> {
-        self.modified.iter().map(|f| f.clone()).collect::<Vec<_>>()
+        self.modified.iter().cloned().collect()
     }
 
     /// Resolve one relative path without traversal or symlinks.
@@ -240,7 +240,7 @@ impl Workspace {
             }
             let Some(name) = path
                 .file_name()
-                .and_then(|name| Some(name.to_string_lossy().to_string()))
+                .map(|name| name.to_string_lossy().to_string())
             else {
                 continue;
             };
@@ -323,11 +323,9 @@ impl Workspace {
                     ))
                 }
             }
-            tool => {
-                Err(AgentError(format!("tool is not enabled: {}", tool)))
-            }
+            tool => Err(AgentError(format!("tool is not enabled: {}", tool))),
         };
-        result.unwrap_or_else(|e| format!("error: {}", e.to_string()))
+        result.unwrap_or_else(|e| format!("error: {}", e))
     }
 }
 
@@ -344,11 +342,7 @@ impl AgentWorkspace for Workspace {
         Workspace::modified_files(self)
     }
 
-    fn execute(
-        &mut self,
-        action: &ToolAction,
-        tool_call_id: Option<&str>,
-    ) -> String {
+    fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
         Workspace::execute(self, action, tool_call_id)
     }
 }

@@ -112,7 +112,7 @@ pub(crate) fn append_tool_result(
     ]));
     ret.push(Message::from([
         ("role".into(), "user".into()),
-        ("content".into(), format!("Tool result:\n{}", result).into()),
+        ("content".into(), format!("Tool result:\n{}", result)),
     ]));
     ret
 }
@@ -145,10 +145,12 @@ pub fn run_agent(
 
     let limits = limits.cloned().unwrap_or(AgentLimits::default());
 
-    let mut run = AgentRun::default();
-    run.completed = false;
+    let mut run = AgentRun {
+        completed: false,
+        ..AgentRun::default()
+    };
 
-    while run.completed == false {
+    while !run.completed {
         if steps >= limits.max_steps {
             run.reason = "step_limit".into();
             break;
@@ -167,10 +169,12 @@ pub fn run_agent(
         }
 
         // each step is an agent event
-        let mut event = AgentEvent::default();
-        event.step = steps;
+        let mut event = AgentEvent {
+            step: steps,
+            response: generate.generate(&messages)?,
+            ..AgentEvent::default()
+        };
 
-        event.response = generate.generate(&messages)?;
         context_chars += event.response.chars().count() as i64;
 
         match parse_action(&event.response, Some(workspace.available_tools())) {
@@ -185,10 +189,7 @@ pub fn run_agent(
 
         match &event.action {
             Some(AgentAction::Tool(tool_action)) => {
-                event.result = Some(
-                    workspace
-                        .execute(tool_action, None)
-                );
+                event.result = Some(workspace.execute(tool_action, None));
                 // messages = append_tool_result(&messages, &event.response, event.result.as_ref().unwrap());
             }
             Some(AgentAction::Final(final_action)) => {

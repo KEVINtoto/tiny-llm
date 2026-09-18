@@ -262,23 +262,20 @@ fn test_task_6_dispatch_returns_recoverable_observations() {
     let mut workspace = make_workspace(&root);
 
     assert_eq!(
-        workspace
-            .execute(
-                &tool_action("read_file", json!({"path": "README.md"})),
-                None,
-            ),
+        workspace.execute(
+            &tool_action("read_file", json!({"path": "README.md"})),
+            None,
+        ),
         "hello"
     );
-    let missing = workspace
-        .execute(
-            &tool_action("read_file", json!({"path": "missing.md"})),
-            None,
-        );
-    let disabled = workspace
-        .execute(
-            &tool_action("write_file", json!({"path": "x", "content": "y"})),
-            None,
-        );
+    let missing = workspace.execute(
+        &tool_action("read_file", json!({"path": "missing.md"})),
+        None,
+    );
+    let disabled = workspace.execute(
+        &tool_action("write_file", json!({"path": "x", "content": "y"})),
+        None,
+    );
     assert!(missing.starts_with("error:"));
     assert_eq!(disabled, "error: tool is not enabled: write_file");
 }
@@ -295,12 +292,12 @@ fn test_task_7_prompt_and_parser_expose_only_read_tools() {
 
     let available = workspace.available_tools();
     assert_eq!(
-        parse_action(r#"{"tool":"list_files"}"#, Some(&available)).unwrap(),
+        parse_action(r#"{"tool":"list_files"}"#, Some(available)).unwrap(),
         AgentAction::Tool(tool_action("list_files", json!({})))
     );
     let error = parse_action(
         r#"{"tool":"write_file","path":"x","content":"y"}"#,
-        Some(&available),
+        Some(available),
     )
     .unwrap_err();
     assert!(error.to_string().contains("not enabled"));

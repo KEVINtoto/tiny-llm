@@ -28,8 +28,7 @@ struct TestDir(PathBuf);
 impl TestDir {
     fn new(label: &str) -> Self {
         let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
-        let path =
-            test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
+        let path = test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
         fs::create_dir(&path).expect("create isolated test directory");
         Self(path)
     }
@@ -522,10 +521,8 @@ fn test_task_6_file_evidence_does_not_dispatch_the_stateful_read_tool() {
             .expect("object")
             .clone(),
     };
-    let result = completed
-        .workspace
-        .execute(&edit, None);
-        // .expect("tool errors remain model-visible");
+    let result = completed.workspace.execute(&edit, None);
+    // .expect("tool errors remain model-visible");
     assert!(result.contains("read the existing file before changing it"));
 }
 

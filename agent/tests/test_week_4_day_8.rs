@@ -31,8 +31,7 @@ struct TestDir(PathBuf);
 impl TestDir {
     fn new(label: &str) -> Self {
         let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
-        let path =
-            test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
+        let path = test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
         fs::create_dir(&path).expect("create isolated test directory");
         Self(path)
     }
@@ -361,15 +360,14 @@ fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
     );
     workspace.read_file("app.py").expect("observe before edit");
 
-    let result = workspace
-        .execute(
-            &action(
-                "edit_file",
-                json!({"path": "app.py", "old": "2", "new": "3"}),
-            ),
-            None,
-        );
-        // .expect("denial remains model-visible");
+    let result = workspace.execute(
+        &action(
+            "edit_file",
+            json!({"path": "app.py", "old": "2", "new": "3"}),
+        ),
+        None,
+    );
+    // .expect("denial remains model-visible");
 
     assert_eq!(
         result,
@@ -396,15 +394,14 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
     );
     allowed.read_file("app.py").expect("observe before edit");
     assert_eq!(
-        allowed
-            .execute(
-                &action(
-                    "edit_file",
-                    json!({"path": "app.py", "old": "1", "new": "2"}),
-                ),
-                None,
+        allowed.execute(
+            &action(
+                "edit_file",
+                json!({"path": "app.py", "old": "1", "new": "2"}),
             ),
-            // .expect("execute allowed edit"),
+            None,
+        ),
+        // .expect("execute allowed edit"),
         "edited app.py"
     );
 
@@ -415,15 +412,14 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
     );
     denied.read_file("app.py").expect("observe before edit");
     assert_eq!(
-        denied
-            .execute(
-                &action(
-                    "edit_file",
-                    json!({"path": "app.py", "old": "2", "new": "3"}),
-                ),
-                None,
+        denied.execute(
+            &action(
+                "edit_file",
+                json!({"path": "app.py", "old": "2", "new": "3"}),
             ),
-            // .expect("execute denied edit"),
+            None,
+        ),
+        // .expect("execute denied edit"),
         "error: operator denied the tool action"
     );
 }

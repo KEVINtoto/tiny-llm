@@ -27,7 +27,7 @@ use tiny_llm_agent::{checkpoint, generation, protocol};
 #[path = "../loop.rs"]
 mod learner_loop;
 
-const MODULES: [&str; 11] = [
+const MODULES: [&str; 13] = [
     "branching",
     "checkpoint",
     "compaction",
@@ -39,6 +39,8 @@ const MODULES: [&str; 11] = [
     "receipts",
     "steering",
     "workspace",
+    "cli",
+    "model_service",
 ];
 
 fn root() -> PathBuf {
