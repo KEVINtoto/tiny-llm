@@ -61,6 +61,8 @@ format-cpp-ref.shell = "find src/extensions_ref -type file \\( -name '*.h' -or -
 format-cpp.shell = "find src/extensions -type file \\( -name '*.h' -or -name '*.cpp' \\) | xargs -n1 clang-format -i"
 copy-test.cmd = "python scripts/dev-tools.py copy-test"
 book.cmd = "mdbook serve book/"
+model-service.cmd = "python model_service.py"
+test-model-service.cmd = "python -m pytest tests_refsol/test_model_service.py"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]

@@ -12,10 +12,6 @@ if [[ ! -x "$python" ]]; then
     exit 1
 fi
 
-# Bypass the system proxy for the local model service.
-# export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
-# export no_proxy="$NO_PROXY"
-
 run_root="$(mktemp -d $repo_root/tmp/tiny-llm-real-workflow-XXXXXX)"
 workspace="$run_root/workspace"
 mkdir -p "$workspace/src"
