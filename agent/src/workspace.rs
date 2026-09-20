@@ -2,14 +2,19 @@
 
 //! Week 4, Day 3 learner surface for workspace effects.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 
+use sha2::Digest;
+use sha2::digest::Update;
+
+use crate::protocol::{AgentError, AgentWorkspace, ToolAction};
 use crate::protocol::{
-    AgentError, AgentWorkspace, LIST_FILES_TOOL_NAME, READ_FILE_TOOL_NAME, ToolAction,
+    EDIT_FILE_TOOL_NAME, LIST_FILES_TOOL_NAME, READ_FILE_TOOL_NAME, RUN_COMMAND_TOOL_NAME,
+    WRITE_FILE_TOOL_NAME,
 };
 use crate::receipts::ReceiptStore;
 
@@ -147,8 +152,8 @@ pub struct Workspace {
     pub confirm_tool: Option<ConfirmTool>,
     /// Python default: ``ReceiptStore()``.
     pub receipt_store: ReceiptStore,
-    observed: HashMap<String, String>,
-    modified: HashSet<String>,
+    observed: HashMap<PathBuf, String>,
+    modified: BTreeSet<String>,
     next_call_number: i64,
 
     available_tools: HashSet<String>,
@@ -160,14 +165,13 @@ impl Workspace {
         confirm_tool: Option<ConfirmTool>,
         receipt_store: ReceiptStore,
     ) -> Self {
-        let available_tools =
-            HashSet::from([LIST_FILES_TOOL_NAME.into(), READ_FILE_TOOL_NAME.into()]);
+        let available_tools = get_available_tools(&policy);
         Self {
             policy,
             confirm_tool,
             receipt_store,
             observed: HashMap::new(),
-            modified: HashSet::new(),
+            modified: BTreeSet::new(),
             next_call_number: 1,
             available_tools,
         }
@@ -285,7 +289,17 @@ impl Workspace {
                 self.policy.max_file_bytes
             )));
         }
-        fs::read_to_string(resolved).map_err(|e| AgentError(format!("invalid UTF-8: {}", e)))
+        let content = fs::read_to_string(&resolved)
+            .map_err(|e| AgentError(format!("invalid UTF-8: {}", e)))?;
+        let hash: String = sha2::Sha256::new()
+            .chain(&content)
+            .finalize()
+            .iter()
+            .map(|b| *b as char)
+            .collect();
+
+        self.observed.insert(resolved, hash);
+        Ok(content)
     }
 
     /// Atomically create a file or replace one previously read unchanged.
@@ -305,25 +319,22 @@ impl Workspace {
 
     /// Dispatch one action, approving and receipting effects once.
     pub fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
-        let result = match action.tool.as_str() {
-            "list_files" => {
-                let path = action
-                    .arguments
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(".");
-                self.list_files(path)
+        if !self.available_tools.contains(action.tool()) {
+            return format!("error: tool is not enabled: {}", action.tool());
+        }
+
+        let result = match action {
+            ToolAction::ListFiles { path } => self.list_files(path),
+            ToolAction::ReadFile { path } => self.read_file(path),
+            ToolAction::WriteFile { .. } => {
+                todo!()
             }
-            "read_file" => {
-                if let Some(path) = action.arguments.get("path").and_then(|v| v.as_str()) {
-                    self.read_file(path)
-                } else {
-                    Err(AgentError(
-                        "missing path argument for read_file tool".into(),
-                    ))
-                }
+            ToolAction::EditFile { .. } => {
+                todo!()
             }
-            tool => Err(AgentError(format!("tool is not enabled: {}", tool))),
+            ToolAction::RunCommand { .. } => {
+                todo!()
+            }
         };
         result.unwrap_or_else(|e| format!("error: {}", e))
     }
@@ -345,4 +356,18 @@ impl AgentWorkspace for Workspace {
     fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
         Workspace::execute(self, action, tool_call_id)
     }
+}
+
+fn get_available_tools(policy: &ToolPolicy) -> HashSet<String> {
+    let mut tools = HashSet::from([LIST_FILES_TOOL_NAME.into(), READ_FILE_TOOL_NAME.into()]);
+
+    if policy.allow_writes {
+        tools.extend([WRITE_FILE_TOOL_NAME.into(), EDIT_FILE_TOOL_NAME.into()]);
+    }
+
+    if !policy.allowed_commands.is_empty() {
+        tools.insert(RUN_COMMAND_TOOL_NAME.into());
+    }
+
+    tools
 }

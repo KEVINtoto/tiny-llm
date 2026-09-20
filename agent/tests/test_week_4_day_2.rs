@@ -2,110 +2,22 @@
 
 //! Rust equivalents of `tests_refsol/test_week_4_day_2.py`.
 
-#[path = "support/temp.rs"]
-mod test_temp;
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{Map, Value, json};
+use serde_json::json;
+
 use tiny_llm_agent::generation::Message;
 use tiny_llm_agent::protocol::AgentAction;
-use tiny_llm_agent::{
-    ReceiptStore, ToolAction, ToolPolicy, Workspace, build_system_prompt, parse_action, run_agent,
-};
-
-static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
-
-struct TestDirectory {
-    path: PathBuf,
-}
-
-impl TestDirectory {
-    fn new() -> Self {
-        let sequence = NEXT_TEMP_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after the Unix epoch")
-            .as_nanos();
-        let path = test_temp::root().join(format!(
-            "tiny-llm-week4-day2-{}-{nanos}-{sequence}",
-            std::process::id()
-        ));
-        fs::create_dir(&path).expect("create isolated test directory");
-        Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-fn policy(root: &Path, max_file_bytes: i64, max_list_entries: i64) -> ToolPolicy {
-    ToolPolicy::new(
-        root.to_path_buf(),
-        max_file_bytes,
-        max_list_entries,
-        false,
-        Vec::new(),
-        ToolPolicy::DEFAULT_MAX_WRITE_BYTES,
-        ToolPolicy::DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-    .unwrap()
-}
-
-fn make_workspace(root: &Path) -> Workspace {
-    make_bounded_workspace(
-        root,
-        ToolPolicy::DEFAULT_MAX_FILE_BYTES,
-        ToolPolicy::DEFAULT_MAX_LIST_ENTRIES,
-    )
-}
-
-fn make_bounded_workspace(root: &Path, max_file_bytes: i64, max_list_entries: i64) -> Workspace {
-    Workspace::new(
-        policy(root, max_file_bytes, max_list_entries),
-        None,
-        ReceiptStore::new(None).unwrap(),
-    )
-}
-
-fn json_arguments(value: Value) -> Map<String, Value> {
-    value
-        .as_object()
-        .expect("test action arguments must be an object")
-        .clone()
-}
-
-fn tool_action(tool: &str, arguments: Value) -> ToolAction {
-    ToolAction {
-        tool: tool.to_owned(),
-        arguments: json_arguments(arguments),
-    }
-}
-
-fn message(role: &str, content: &str) -> Message {
-    [
-        ("role".to_owned(), role.to_owned()),
-        ("content".to_owned(), content.to_owned()),
-    ]
-    .into_iter()
-    .collect()
-}
+use tiny_llm_agent::{ToolPolicy, build_system_prompt, parse_action, run_agent};
 
 #[test]
 fn test_task_1_policy_requires_a_directory_and_positive_limits() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     let root = temporary.path().join("workspace");
     fs::create_dir(&root).unwrap();
 
@@ -163,13 +75,13 @@ fn test_task_1_policy_requires_a_directory_and_positive_limits() {
 
 #[test]
 fn test_task_2_lists_and_reads_workspace_files() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     let root = temporary.path().join("workspace");
     fs::create_dir(&root).unwrap();
     fs::write(root.join("README.md"), "hello agent\n").unwrap();
     fs::create_dir(root.join("src")).unwrap();
     fs::write(root.join("src/main.py"), "print('hi')\n").unwrap();
-    let mut workspace = make_workspace(&root);
+    let mut workspace = test_utils::make_workspace(&root);
 
     assert_eq!(
         workspace.available_tools(),
@@ -189,7 +101,7 @@ fn test_task_2_lists_and_reads_workspace_files() {
 fn test_task_3_rejects_escapes_secrets_and_symlinks() {
     use std::os::unix::fs::symlink;
 
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     let root = temporary.path().join("workspace");
     fs::create_dir(&root).unwrap();
     let outside = temporary.path().join("outside.txt");
@@ -198,7 +110,7 @@ fn test_task_3_rejects_escapes_secrets_and_symlinks() {
     fs::write(root.join(".env"), "TOKEN=secret").unwrap();
     fs::create_dir(root.join(".git")).unwrap();
     symlink(&outside, root.join("outside-link")).unwrap();
-    let mut workspace = make_workspace(&root);
+    let mut workspace = test_utils::make_workspace(&root);
 
     for raw in [
         "../outside.txt".to_owned(),
@@ -217,14 +129,14 @@ fn test_task_3_rejects_escapes_secrets_and_symlinks() {
 
 #[test]
 fn test_task_4_bounds_directory_and_file_observations() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     let root = temporary.path().join("workspace");
     fs::create_dir(&root).unwrap();
     for name in ["a.txt", "b.txt", "c.txt"] {
         fs::write(root.join(name), name).unwrap();
     }
     fs::write(root.join("large.txt"), "too large").unwrap();
-    let mut workspace = make_bounded_workspace(&root, 5, 2);
+    let mut workspace = test_utils::make_bounded_workspace(&root, 5, 2);
 
     assert_eq!(
         workspace
@@ -240,12 +152,12 @@ fn test_task_4_bounds_directory_and_file_observations() {
 
 #[test]
 fn test_task_5_rejects_directories_and_non_utf8_files() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     let root = temporary.path().join("workspace");
     fs::create_dir(&root).unwrap();
     fs::create_dir(root.join("folder")).unwrap();
     fs::write(root.join("binary.bin"), [0xff]).unwrap();
-    let mut workspace = make_workspace(&root);
+    let mut workspace = test_utils::make_workspace(&root);
 
     let directory_error = workspace.read_file("folder").unwrap_err();
     assert!(directory_error.to_string().contains("regular file"));
@@ -255,25 +167,25 @@ fn test_task_5_rejects_directories_and_non_utf8_files() {
 
 #[test]
 fn test_task_6_dispatch_returns_recoverable_observations() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     let root = temporary.path().join("workspace");
     fs::create_dir(&root).unwrap();
     fs::write(root.join("README.md"), "hello").unwrap();
-    let mut workspace = make_workspace(&root);
+    let mut workspace = test_utils::make_workspace(&root);
 
     assert_eq!(
         workspace.execute(
-            &tool_action("read_file", json!({"path": "README.md"})),
+            &test_utils::tool_action("read_file", json!({"path": "README.md"})),
             None,
         ),
         "hello"
     );
     let missing = workspace.execute(
-        &tool_action("read_file", json!({"path": "missing.md"})),
+        &test_utils::tool_action("read_file", json!({"path": "missing.md"})),
         None,
     );
     let disabled = workspace.execute(
-        &tool_action("write_file", json!({"path": "x", "content": "y"})),
+        &test_utils::tool_action("write_file", json!({"path": "x", "content": "y"})),
         None,
     );
     assert!(missing.starts_with("error:"));
@@ -282,8 +194,8 @@ fn test_task_6_dispatch_returns_recoverable_observations() {
 
 #[test]
 fn test_task_7_prompt_and_parser_expose_only_read_tools() {
-    let temporary = TestDirectory::new();
-    let workspace = make_workspace(temporary.path());
+    let temporary = test_utils::TestDir::new("day2");
+    let workspace = test_utils::make_workspace(temporary.path());
     let prompt = build_system_prompt(&workspace);
 
     assert!(prompt.contains(r#""tool":"list_files""#));
@@ -293,7 +205,7 @@ fn test_task_7_prompt_and_parser_expose_only_read_tools() {
     let available = workspace.available_tools();
     assert_eq!(
         parse_action(r#"{"tool":"list_files"}"#, Some(available)).unwrap(),
-        AgentAction::Tool(tool_action("list_files", json!({})))
+        AgentAction::Tool(test_utils::tool_action("list_files", json!({})))
     );
     let error = parse_action(
         r#"{"tool":"write_file","path":"x","content":"y"}"#,
@@ -305,9 +217,9 @@ fn test_task_7_prompt_and_parser_expose_only_read_tools() {
 
 #[test]
 fn test_task_8_agent_lists_reads_observes_and_finishes() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day2");
     fs::write(temporary.path().join("README.md"), "hello from README").unwrap();
-    let mut workspace = make_workspace(temporary.path());
+    let mut workspace = test_utils::make_workspace(temporary.path());
     let responses = RefCell::new(VecDeque::from([
         r#"{"tool":"list_files"}"#.to_owned(),
         r#"{"tool":"read_file","path":"README.md"}"#.to_owned(),
@@ -336,7 +248,7 @@ fn test_task_8_agent_lists_reads_observes_and_finishes() {
     let action_tools = result.events[..2]
         .iter()
         .map(|event| match event.action.as_ref() {
-            Some(AgentAction::Tool(action)) => action.tool.as_str(),
+            Some(AgentAction::Tool(action)) => action.tool(),
             other => panic!("expected a tool action, got {other:?}"),
         })
         .collect::<Vec<_>>();
@@ -348,6 +260,9 @@ fn test_task_8_agent_lists_reads_observes_and_finishes() {
     );
     assert_eq!(
         seen_messages.borrow()[2].last(),
-        Some(&message("user", "Tool result:\nhello from README"))
+        Some(&test_utils::message(
+            "user",
+            "Tool result:\nhello from README"
+        ))
     );
 }

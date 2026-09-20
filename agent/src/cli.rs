@@ -2,8 +2,8 @@
 //! Workspace/receipt/loop course TODOs are intentionally left to the learner.
 
 #[cfg(test)]
-#[path = "tests/support/temp.rs"]
-mod test_temp;
+#[path = "../tests/support/utils.rs"]
+mod test_utils;
 
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
@@ -176,9 +176,7 @@ fn receipt_path(root: &Path, raw: Option<&Path>) -> Result<Option<PathBuf>, Agen
 }
 
 fn action_payload(action: &ToolAction) -> Value {
-    let mut payload = action.arguments.clone();
-    payload.insert("tool".into(), Value::String(action.tool.clone()));
-    Value::Object(payload)
+    serde_json::to_value(action).expect("tool actions must serialize")
 }
 
 fn confirm_with_io(
@@ -188,7 +186,7 @@ fn confirm_with_io(
     output: &mut impl Write,
 ) -> io::Result<bool> {
     writeln!(output, "\napproval requested> {}", action_payload(action))?;
-    if action.tool == "run_command" {
+    if action.tool() == "run_command" {
         writeln!(
             output,
             "warning> an allowed command is not confined by the workspace boundary"
@@ -326,7 +324,7 @@ mod tests {
 
     #[test]
     fn parses_task_and_defaults() {
-        let root = test_temp::tempdir().unwrap();
+        let root = test_utils::tempdir().unwrap();
         let path = root.path().to_str().unwrap();
         let args = Args::try_parse_from(["agent-cli", "--root", path, "检查", "README"]).unwrap();
         assert_eq!(args.task, ["检查", "README"]);
@@ -356,7 +354,7 @@ mod tests {
 
     #[test]
     fn context_rejects_invalid_task_and_workspace_before_initializing_receipts() {
-        let root = test_temp::tempdir().unwrap();
+        let root = test_utils::tempdir().unwrap();
         let args =
             Args::try_parse_from(["agent-cli", "--root", root.path().to_str().unwrap(), "  "])
                 .unwrap();
@@ -393,7 +391,7 @@ mod tests {
 
     #[test]
     fn receipt_log_requires_a_relative_path_and_existing_parent() {
-        let root = test_temp::tempdir().unwrap();
+        let root = test_utils::tempdir().unwrap();
         assert_eq!(receipt_path(root.path(), None).unwrap(), None);
         assert_eq!(
             receipt_path(root.path(), Some(Path::new("receipts.jsonl"))).unwrap(),
@@ -417,9 +415,8 @@ mod tests {
 
     #[test]
     fn approval_requires_tty_and_explicit_yes() {
-        let action = ToolAction {
-            tool: "run_command".into(),
-            arguments: serde_json::Map::new(),
+        let action = ToolAction::RunCommand {
+            argv: vec!["echo".into(), "hello".into()],
         };
         let mut input = Cursor::new(b"yes\n");
         let mut output = Vec::new();

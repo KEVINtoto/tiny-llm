@@ -2,8 +2,8 @@
 
 //! Rust port of the Week 4 Day 8 cached-fork, steering, and selection tests.
 
-#[path = "support/temp.rs"]
-mod test_temp;
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use std::cell::RefCell;
 use std::fs;
@@ -12,63 +12,19 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::json;
+
 use tiny_llm_agent::generation::{
     Generate, GenerationCache, GenerationModel, GenerationTokenizer, Message,
 };
 use tiny_llm_agent::protocol::{AgentError, ToolAction};
-use tiny_llm_agent::workspace::{ConfirmResult, ToolPolicy, Workspace};
+use tiny_llm_agent::workspace::{ConfirmResult, Workspace};
 use tiny_llm_agent::{
     ApprovalDecision, EvaluationCase, FileExpectation, KvPrefixGenerator, ModelCheckpoint,
     PrefixReuse, ReceiptExpectation, ReceiptStore, ResultExpectation, run_branch,
     run_to_checkpoint, select_branch,
 };
 
-static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(1);
 static NEXT_CACHE_ID: AtomicU64 = AtomicU64::new(1);
-
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new(label: &str) -> Self {
-        let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
-        let path = test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
-        fs::create_dir(&path).expect("create isolated test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn policy(root: &Path, allow_writes: bool, allowed_commands: Vec<Vec<String>>) -> ToolPolicy {
-    ToolPolicy::new(
-        root.to_path_buf(),
-        ToolPolicy::DEFAULT_MAX_FILE_BYTES,
-        ToolPolicy::DEFAULT_MAX_LIST_ENTRIES,
-        allow_writes,
-        allowed_commands,
-        ToolPolicy::DEFAULT_MAX_WRITE_BYTES,
-        ToolPolicy::DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-    .expect("valid test policy")
-}
-
-fn action(tool: &str, arguments: serde_json::Value) -> ToolAction {
-    ToolAction {
-        tool: tool.to_owned(),
-        arguments: arguments
-            .as_object()
-            .expect("tool arguments must be an object")
-            .clone(),
-    }
-}
 
 #[derive(Debug)]
 struct ScriptedCheckpointModel {
@@ -272,13 +228,6 @@ impl GenerationTokenizer for CharacterTokenizer {
     }
 }
 
-fn message(role: &str, content: &str) -> Message {
-    Message::from([
-        ("role".to_owned(), role.to_owned()),
-        ("content".to_owned(), content.to_owned()),
-    ])
-}
-
 impl ScriptedCheckpointModel {
     fn new(responses: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
@@ -291,13 +240,6 @@ impl ScriptedCheckpointModel {
                 avoided_prefill_tokens: 0,
             },
         }
-    }
-
-    fn tokens(messages: &[Message]) -> Vec<i64> {
-        messages
-            .iter()
-            .map(|message| message["content"].chars().count() as i64)
-            .collect()
     }
 }
 
@@ -314,7 +256,7 @@ impl Generate for ScriptedCheckpointModel {
     }
 
     fn save_checkpoint(&mut self, messages: &[Message]) -> Result<ModelCheckpoint, AgentError> {
-        let tokens = Self::tokens(messages);
+        let tokens = test_utils::fake_token_ids(messages);
         ModelCheckpoint::new(
             messages.len() as i64,
             self.response_index as i64,
@@ -344,12 +286,12 @@ impl Generate for ScriptedCheckpointModel {
 
 #[test]
 fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
-    let temp = TestDir::new("day8-structured-denial");
+    let temp = test_utils::TestDir::new("day8-structured-denial");
     fs::write(temp.path().join("app.py"), b"answer = 2\n").expect("seed app.py");
     let receipts =
         ReceiptStore::new(Some(temp.path().join("receipts.jsonl"))).expect("create receipt store");
     let mut workspace = Workspace::new(
-        policy(temp.path(), true, vec![]),
+        test_utils::policy(temp.path(), true, vec![]),
         Some(Box::new(|_action| {
             ConfirmResult::Decision(
                 ApprovalDecision::new(false, "keep the requested answer at 2".to_owned())
@@ -361,7 +303,7 @@ fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
     workspace.read_file("app.py").expect("observe before edit");
 
     let result = workspace.execute(
-        &action(
+        &test_utils::tool_action(
             "edit_file",
             json!({"path": "app.py", "old": "2", "new": "3"}),
         ),
@@ -385,17 +327,17 @@ fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
 
 #[test]
 fn test_task_1_legacy_boolean_approval_remains_compatible() {
-    let temp = TestDir::new("day8-bool-approval");
+    let temp = test_utils::TestDir::new("day8-bool-approval");
     fs::write(temp.path().join("app.py"), b"answer = 1\n").expect("seed app.py");
     let mut allowed = Workspace::new(
-        policy(temp.path(), true, vec![]),
+        test_utils::policy(temp.path(), true, vec![]),
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
         ReceiptStore::new(None).expect("receipt store"),
     );
     allowed.read_file("app.py").expect("observe before edit");
     assert_eq!(
         allowed.execute(
-            &action(
+            &test_utils::tool_action(
                 "edit_file",
                 json!({"path": "app.py", "old": "1", "new": "2"}),
             ),
@@ -406,14 +348,14 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
     );
 
     let mut denied = Workspace::new(
-        policy(temp.path(), true, vec![]),
+        test_utils::policy(temp.path(), true, vec![]),
         Some(Box::new(|_action| ConfirmResult::Approved(false))),
         ReceiptStore::new(None).expect("receipt store"),
     );
     denied.read_file("app.py").expect("observe before edit");
     assert_eq!(
         denied.execute(
-            &action(
+            &test_utils::tool_action(
                 "edit_file",
                 json!({"path": "app.py", "old": "2", "new": "3"}),
             ),
@@ -431,10 +373,10 @@ fn test_task_2_cached_prefix_is_prefilled_once_and_reused_by_both_forks() {
     let tokenizer: Rc<RefCell<dyn GenerationTokenizer>> = Rc::new(RefCell::new(CharacterTokenizer));
     let mut generator = KvPrefixGenerator::new(model, tokenizer, 4, false);
     let messages = vec![
-        message("system", "system"),
-        message("user", "task"),
-        message("assistant", r#"{"tool":"read_file","path":"app.py"}"#),
-        message("user", "Tool result:\nanswer = 2\n"),
+        test_utils::message("system", "system"),
+        test_utils::message("user", "task"),
+        test_utils::message("assistant", r#"{"tool":"read_file","path":"app.py"}"#),
+        test_utils::message("user", "Tool result:\nanswer = 2\n"),
     ];
     let checkpoint = generator
         .save_checkpoint(&messages)
@@ -449,9 +391,9 @@ fn test_task_2_cached_prefix_is_prefilled_once_and_reused_by_both_forks() {
         .expect("restore second fork");
 
     let mut first_messages = messages.clone();
-    first_messages.push(message("user", "Operator steering:\nvalidate"));
+    first_messages.push(test_utils::message("user", "Operator steering:\nvalidate"));
     let mut second_messages = messages.clone();
-    second_messages.push(message("user", "Operator steering:\ninspect"));
+    second_messages.push(test_utils::message("user", "Operator steering:\ninspect"));
     assert_eq!(first.call(&first_messages).expect("first continuation"), "");
     assert_eq!(
         second.call(&second_messages).expect("second continuation"),
@@ -503,7 +445,10 @@ fn test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix() {
     let model: Rc<RefCell<dyn GenerationModel>> = Rc::new(RefCell::new(DenseEosModel::default()));
     let tokenizer: Rc<RefCell<dyn GenerationTokenizer>> = Rc::new(RefCell::new(CharacterTokenizer));
     let mut generator = KvPrefixGenerator::new(model, tokenizer, 2, false);
-    let messages = vec![message("system", "system"), message("user", "task")];
+    let messages = vec![
+        test_utils::message("system", "system"),
+        test_utils::message("user", "task"),
+    ];
     let checkpoint = generator.save_checkpoint(&messages).expect("save prefix");
     let mut branch = generator.fork();
 
@@ -514,8 +459,8 @@ fn test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix() {
     let mut foreign_generator = KvPrefixGenerator::new(foreign_model, foreign_tokenizer, 2, false);
     let foreign_checkpoint = foreign_generator
         .save_checkpoint(&[
-            message("system", "foreign system"),
-            message("user", "foreign task"),
+            test_utils::message("system", "foreign system"),
+            test_utils::message("user", "foreign task"),
         ])
         .expect("save foreign prefix");
 
@@ -529,9 +474,9 @@ fn test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix() {
         .restore_checkpoint(&checkpoint)
         .expect("restore matching prefix");
     let changed = vec![
-        message("system", "changed"),
-        message("user", "task"),
-        message("user", "Operator steering:\ncontinue"),
+        test_utils::message("system", "changed"),
+        test_utils::message("user", "task"),
+        test_utils::message("user", "Operator steering:\ncontinue"),
     ];
     let error = branch.call(&changed).unwrap_err();
     assert!(
@@ -541,14 +486,14 @@ fn test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix() {
     );
 }
 
-fn forkable_effect(temp: &TestDir) -> (PathBuf, tiny_llm_agent::AgentCheckpoint) {
+fn forkable_effect(temp: &test_utils::TestDir) -> (PathBuf, tiny_llm_agent::AgentCheckpoint) {
     let base = temp.path().join("base");
     fs::create_dir(&base).expect("create base branch");
     fs::write(base.join("app.py"), b"answer = 1\n").expect("seed app.py");
     let receipts =
         ReceiptStore::new(Some(base.join("receipts.jsonl"))).expect("create receipt store");
     let mut workspace = Workspace::new(
-        policy(&base, true, vec![]),
+        test_utils::policy(&base, true, vec![]),
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
         receipts,
     );
@@ -584,7 +529,7 @@ fn copy_branch(
         .expect("load evaluation receipts");
     (
         Workspace::new(
-            policy(destination, true, vec![command]),
+            test_utils::policy(destination, true, vec![command]),
             Some(Box::new(approval)),
             evaluation_receipts.clone(),
         ),
@@ -627,7 +572,7 @@ fn branch_case() -> EvaluationCase {
 
 #[test]
 fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() {
-    let temp = TestDir::new("day8-branches");
+    let temp = test_utils::TestDir::new("day8-branches");
     let (base, checkpoint) = forkable_effect(&temp);
     let initial_receipts = fs::read(base.join("receipts.jsonl")).expect("base receipts");
     let command = vec![
@@ -775,7 +720,7 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
 
 #[test]
 fn test_task_5_selection_requires_one_named_passing_outcome() {
-    let temp = TestDir::new("day8-selection");
+    let temp = test_utils::TestDir::new("day8-selection");
     let (base, checkpoint) = forkable_effect(&temp);
     let command = vec!["/bin/sh".to_owned(), "-c".to_owned(), "exit 0".to_owned()];
     let (mut workspace, mut receipts) =

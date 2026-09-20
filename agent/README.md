@@ -1,6 +1,6 @@
 # Rust Agent CLI and Python Model Service
 
-`agent/cli.rs` connects the Rust learner agent to a standalone Python MLX-LM
+`src/cli.rs` connects the Rust learner agent to a standalone Python MLX-LM
 service. Python owns model loading, chat-template rendering, and generation;
 Rust sends the complete conversation on each request and owns the agent loop
 and workspace tools. The original `agent.py` entrypoint is unchanged.
@@ -71,10 +71,50 @@ curl http://127.0.0.1:8000/generate \
   -d '{"messages":[{"role":"user","content":"Say hello."}],"max_tokens":32}'
 ```
 
+## Action JSON Schema
+
+`ToolAction` is a Serde internally tagged enum: each tool has its own variant
+with typed arguments. The JSON wire format stays flat:
+
+```rust
+use tiny_llm_agent::{ToolAction, action_schema};
+
+let action: ToolAction =
+    r#"{"tool":"read_file","path":"README.md"}"#.parse().unwrap();
+assert_eq!(action, ToolAction::ReadFile { path: "README.md".into() });
+let schema_json = serde_json::to_string_pretty(&action_schema()).unwrap();
+```
+
+`serde_json::from_str::<ToolAction>()` also accepts these JSON strings.
+Schemars derives the schema from the same Serde definitions, including required
+fields and `additionalProperties: false`. Missing arguments, unknown tools,
+extra fields, and incorrect argument types are rejected. Only `list_files.path`
+may be omitted; it defaults to `"."`. `run_command.argv` is an array of strings.
+Final actions accept only `{"final":"..."}`; mixed final/tool objects are rejected.
+`parse_action(response, Some(&available_tools))` additionally checks the runtime
+tool allowlist, which is separate from the schema.
+
+Run the focused protocol tests with `cargo test --lib protocol::tests`.
+
+## Rust workspace
+
+The repository root is a Cargo workspace with shared dependency versions:
+
+`agent/Cargo.toml` defines the `tiny-llm-agent` library, `agent-cli` binary,
+and integration tests. Source files live in `agent/src/`; Cargo automatically
+discovers the test files in `agent/tests/`. Shared helpers live in
+`tests/support/utils.rs` and are imported through `mod support` and
+`use support::utils as test_utils`.
+
+Run Cargo commands from the repository root. Existing test names are preserved,
+for example `cargo test --test test_week_4_day_1`. Use
+`cargo check --workspace --all-targets` to check the library, CLI, and tests.
+
 ## Tests
 
 Rust tests create temporary directories under the repository's `tmp/`, using
-`CARGO_MANIFEST_DIR` rather than the current directory or system `TMPDIR`.
+the workspace member’s `CARGO_MANIFEST_DIR` to locate the repository root,
+rather than the current directory or system `TMPDIR`.
 Each test keeps its own isolated directory and removes it when finished.
 
 The HTTP adapter tests are in [test_model_service.rs](tests/test_model_service.rs);

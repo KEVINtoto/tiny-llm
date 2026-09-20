@@ -2,52 +2,22 @@
 
 //! Week 4 Day 6 inspect-and-steer course-code tests.
 
-#[path = "support/temp.rs"]
-mod test_temp;
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::rc::Rc;
 
 use serde_json::json;
-use test_temp::tempdir;
+
 use tiny_llm_agent::generation::{Generate, Message};
 use tiny_llm_agent::protocol::AgentError;
 use tiny_llm_agent::workspace::{ConfirmResult, ConfirmTool};
 use tiny_llm_agent::{
-    ModelCheckpoint, ReceiptStore, ToolPolicy, Workspace, create_checkpoint, inspect_checkpoint,
+    ModelCheckpoint, ReceiptStore, Workspace, create_checkpoint, inspect_checkpoint,
     resume_with_steering, run_to_checkpoint,
 };
-
-fn message(role: &str, content: impl Into<String>) -> Message {
-    HashMap::from([
-        ("role".to_owned(), role.to_owned()),
-        ("content".to_owned(), content.into()),
-    ])
-}
-
-fn policy(root: &Path, allow_writes: bool, allowed_commands: Vec<Vec<String>>) -> ToolPolicy {
-    ToolPolicy::new(
-        root.to_path_buf(),
-        ToolPolicy::DEFAULT_MAX_FILE_BYTES,
-        ToolPolicy::DEFAULT_MAX_LIST_ENTRIES,
-        allow_writes,
-        allowed_commands,
-        ToolPolicy::DEFAULT_MAX_WRITE_BYTES,
-        ToolPolicy::DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-    .unwrap()
-}
-
-fn workspace(root: &Path) -> Workspace {
-    Workspace::new(
-        policy(root, false, vec![]),
-        None,
-        ReceiptStore::new(None).unwrap(),
-    )
-}
 
 struct FakeSteeringModel {
     responses: Vec<String>,
@@ -68,13 +38,6 @@ impl FakeSteeringModel {
             calls: vec![],
         }
     }
-
-    fn tokens(messages: &[Message]) -> Vec<i64> {
-        messages
-            .iter()
-            .map(|message| message["content"].chars().count() as i64)
-            .collect()
-    }
 }
 
 impl Generate for FakeSteeringModel {
@@ -82,7 +45,10 @@ impl Generate for FakeSteeringModel {
         self.calls.push(messages.to_vec());
         if let Some(restored) = self.restored.take() {
             let prefix = &messages[..restored.conversation_position as usize];
-            assert_eq!(Self::tokens(prefix), restored.cached_token_ids);
+            assert_eq!(
+                test_utils::fake_token_ids(prefix),
+                restored.cached_token_ids
+            );
         }
         let response = self
             .responses
@@ -94,7 +60,7 @@ impl Generate for FakeSteeringModel {
     }
 
     fn save_checkpoint(&mut self, messages: &[Message]) -> Result<ModelCheckpoint, AgentError> {
-        let tokens = Self::tokens(messages);
+        let tokens = test_utils::fake_token_ids(messages);
         ModelCheckpoint::new(
             messages.len() as i64,
             self.response_index as i64,
@@ -110,19 +76,11 @@ impl Generate for FakeSteeringModel {
     }
 }
 
-fn assert_error_contains<T: std::fmt::Debug>(result: Result<T, AgentError>, expected: &str) {
-    let error = result.expect_err("operation unexpectedly succeeded");
-    assert!(
-        error.to_string().contains(expected),
-        "expected error containing {expected:?}, got {error}"
-    );
-}
-
 #[test]
 fn test_task_1_status_reports_only_the_complete_checkpoint_boundary() {
-    let directory = tempdir().unwrap();
+    let directory = test_utils::tempdir().unwrap();
     fs::write(directory.path().join("README.md"), "project evidence\n").unwrap();
-    let mut workspace = workspace(directory.path());
+    let mut workspace = test_utils::read_only_workspace(directory.path());
     let mut model = FakeSteeringModel::new(&[r#"{"tool":"read_file","path":"README.md"}"#]);
     let checkpoint =
         run_to_checkpoint("inspect the project", &mut model, &mut workspace, 1, None).unwrap();
@@ -144,10 +102,10 @@ fn test_task_1_status_reports_only_the_complete_checkpoint_boundary() {
 #[test]
 fn test_task_2_status_preview_is_bounded_and_inspection_is_pure() {
     let messages = vec![
-        message("system", "system"),
-        message("user", "inspect"),
-        message("assistant", r#"{"tool":"read_file","path":"a"}"#),
-        message("user", "Tool result:\nabcdefghij"),
+        test_utils::message("system", "system"),
+        test_utils::message("user", "inspect"),
+        test_utils::message("assistant", r#"{"tool":"read_file","path":"a"}"#),
+        test_utils::message("user", "Tool result:\nabcdefghij"),
     ];
     let model = ModelCheckpoint::new(4, 1, vec![6, 7, 31, 22], vec![4]).unwrap();
     let checkpoint = create_checkpoint("inspect", &messages, model.clone()).unwrap();
@@ -161,15 +119,15 @@ fn test_task_2_status_preview_is_bounded_and_inspection_is_pure() {
         &("user".to_owned(), "Tool result:\nabcdefghij".to_owned())
     );
     assert_eq!(checkpoint.model, model);
-    assert_error_contains(inspect_checkpoint(&checkpoint, 0), "positive integer");
+    test_utils::assert_error_contains(inspect_checkpoint(&checkpoint, 0), "positive integer");
 }
 
 fn checkpoint_with_action(action: &str) -> tiny_llm_agent::AgentCheckpoint {
     let messages = vec![
-        message("system", "system"),
-        message("user", "inspect"),
-        message("assistant", action),
-        message("user", "Tool result:\nresult"),
+        test_utils::message("system", "system"),
+        test_utils::message("user", "inspect"),
+        test_utils::message("assistant", action),
+        test_utils::message("user", "Tool result:\nresult"),
     ];
     create_checkpoint(
         "inspect",
@@ -184,7 +142,7 @@ macro_rules! invalid_status_test {
         #[test]
         fn $name() {
             let checkpoint = checkpoint_with_action($action);
-            assert_error_contains(inspect_checkpoint(&checkpoint, 160), $error);
+            test_utils::assert_error_contains(inspect_checkpoint(&checkpoint, 160), $error);
         }
     };
 }
@@ -222,7 +180,10 @@ invalid_status_test!(
 
 #[test]
 fn test_task_3_status_rejects_an_incomplete_tool_boundary() {
-    let messages = vec![message("system", "system"), message("user", "inspect")];
+    let messages = vec![
+        test_utils::message("system", "system"),
+        test_utils::message("user", "inspect"),
+    ];
     let checkpoint = create_checkpoint(
         "inspect",
         &messages,
@@ -230,7 +191,7 @@ fn test_task_3_status_rejects_an_incomplete_tool_boundary() {
     )
     .unwrap();
 
-    assert_error_contains(
+    test_utils::assert_error_contains(
         inspect_checkpoint(&checkpoint, 160),
         "complete tool observation",
     );
@@ -238,10 +199,10 @@ fn test_task_3_status_rejects_an_incomplete_tool_boundary() {
 
 #[test]
 fn test_task_4_steering_is_one_visible_message_in_stable_order() {
-    let directory = tempdir().unwrap();
+    let directory = test_utils::tempdir().unwrap();
     fs::write(directory.path().join("a.txt"), "A\n").unwrap();
     fs::write(directory.path().join("b.txt"), "B\n").unwrap();
-    let mut workspace = workspace(directory.path());
+    let mut workspace = test_utils::read_only_workspace(directory.path());
     let responses = [
         r#"{"tool":"read_file","path":"a.txt"}"#,
         r#"{"tool":"read_file","path":"b.txt"}"#,
@@ -303,7 +264,7 @@ fn test_task_4_steering_is_one_visible_message_in_stable_order() {
 
 #[test]
 fn test_task_5_steered_resume_does_not_replay_the_completed_edit() {
-    let directory = tempdir().unwrap();
+    let directory = test_utils::tempdir().unwrap();
     let source = directory.path().join("app.py");
     let counter = directory.path().join("validation-count.txt");
     fs::write(&source, "answer = 1\n").unwrap();
@@ -322,12 +283,14 @@ fn test_task_5_steered_resume_does_not_replay_the_completed_edit() {
     let approvals = Rc::new(RefCell::new(Vec::<String>::new()));
     let captured_approvals = Rc::clone(&approvals);
     let confirm: ConfirmTool = Box::new(move |action| {
-        captured_approvals.borrow_mut().push(action.tool.clone());
+        captured_approvals
+            .borrow_mut()
+            .push(action.tool().to_owned());
         ConfirmResult::Approved(true)
     });
     let receipts = ReceiptStore::new(Some(directory.path().join("receipts.jsonl"))).unwrap();
     let mut workspace = Workspace::new(
-        policy(directory.path(), true, vec![validation.clone()]),
+        test_utils::policy(directory.path(), true, vec![validation.clone()]),
         Some(confirm),
         receipts.clone(),
     );
@@ -393,19 +356,19 @@ fn test_task_5_steered_resume_does_not_replay_the_completed_edit() {
     );
     assert_eq!(
         visible[checkpoint.model.conversation_position as usize],
-        message("user", "Operator steering:\nvalidate before answering")
+        test_utils::message("user", "Operator steering:\nvalidate before answering")
     );
 }
 
 #[test]
 fn test_task_6_steering_and_checkpoint_validation_fail_closed() {
-    let directory = tempdir().unwrap();
-    let mut workspace = workspace(directory.path());
+    let directory = test_utils::tempdir().unwrap();
+    let mut workspace = test_utils::read_only_workspace(directory.path());
     let mut model = FakeSteeringModel::new(&[r#"{"tool":"list_files","path":"."}"#]);
     let checkpoint = run_to_checkpoint("inspect", &mut model, &mut workspace, 1, None).unwrap();
 
     let mut empty_model = FakeSteeringModel::new(&[]);
-    assert_error_contains(
+    test_utils::assert_error_contains(
         resume_with_steering(&checkpoint, "   ", &mut empty_model, &mut workspace, None),
         "steering",
     );
@@ -413,13 +376,13 @@ fn test_task_6_steering_and_checkpoint_validation_fail_closed() {
     let mut invalid = checkpoint.clone();
     invalid.checkpoint_id = "0".repeat(64);
     let mut empty_model = FakeSteeringModel::new(&[]);
-    assert_error_contains(
+    test_utils::assert_error_contains(
         resume_with_steering(&invalid, "continue", &mut empty_model, &mut workspace, None),
         "identity",
     );
 
     let mut plain_generate = |_messages: &[Message]| r#"{"final":"done"}"#.to_owned();
-    assert_error_contains(
+    test_utils::assert_error_contains(
         resume_with_steering(
             &checkpoint,
             "continue",
@@ -430,7 +393,10 @@ fn test_task_6_steering_and_checkpoint_validation_fail_closed() {
         "checkpoint restore",
     );
 
-    let incomplete_messages = vec![message("system", "system"), message("user", "inspect")];
+    let incomplete_messages = vec![
+        test_utils::message("system", "system"),
+        test_utils::message("user", "inspect"),
+    ];
     let incomplete = create_checkpoint(
         "inspect",
         &incomplete_messages,
@@ -438,7 +404,7 @@ fn test_task_6_steering_and_checkpoint_validation_fail_closed() {
     )
     .unwrap();
     let mut untouched = FakeSteeringModel::new(&[]);
-    assert_error_contains(
+    test_utils::assert_error_contains(
         resume_with_steering(
             &incomplete,
             "continue",

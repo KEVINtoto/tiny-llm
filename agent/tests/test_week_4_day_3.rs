@@ -2,102 +2,29 @@
 
 //! Rust equivalents of `tests_refsol/test_week_4_day_3.py`.
 
-#[path = "support/temp.rs"]
-mod test_temp;
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
+
 use tiny_llm_agent::generation::Message;
 use tiny_llm_agent::workspace::ConfirmResult;
 use tiny_llm_agent::{EffectReceipt, ReceiptStore, ToolAction, ToolPolicy, Workspace, run_agent};
 
-static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
-
-struct TestDirectory {
-    path: PathBuf,
-}
-
-impl TestDirectory {
-    fn new() -> Self {
-        let sequence = NEXT_TEMP_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after the Unix epoch")
-            .as_nanos();
-        let path = test_temp::root().join(format!(
-            "tiny-llm-week4-day3-{}-{nanos}-{sequence}",
-            std::process::id()
-        ));
-        fs::create_dir(&path).expect("create isolated test directory");
-        Self { path }
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TestDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-fn json_arguments(value: Value) -> Map<String, Value> {
-    value
-        .as_object()
-        .expect("test action arguments must be an object")
-        .clone()
-}
-
-fn tool_action(tool: &str, arguments: Value) -> ToolAction {
-    ToolAction {
-        tool: tool.to_owned(),
-        arguments: json_arguments(arguments),
-    }
-}
-
-fn make_policy(root: &Path, allow_writes: bool, allowed_commands: Vec<Vec<String>>) -> ToolPolicy {
-    ToolPolicy::new(
-        root.to_path_buf(),
-        ToolPolicy::DEFAULT_MAX_FILE_BYTES,
-        ToolPolicy::DEFAULT_MAX_LIST_ENTRIES,
-        allow_writes,
-        allowed_commands,
-        ToolPolicy::DEFAULT_MAX_WRITE_BYTES,
-        ToolPolicy::DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-    .unwrap()
-}
-
-fn memory_store() -> ReceiptStore {
-    ReceiptStore::new(None).unwrap()
-}
-
-fn read_only_workspace(root: &Path) -> Workspace {
-    Workspace::new(make_policy(root, false, Vec::new()), None, memory_store())
-}
-
-fn string_vec(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|part| (*part).to_owned()).collect()
-}
-
 #[test]
 fn test_task_1_policy_enables_only_explicit_effects() {
-    let temporary = TestDirectory::new();
-    let command = string_vec(&["/bin/sh", "-c", "printf 'ok\\n'"]);
-    let read_only = read_only_workspace(temporary.path());
+    let temporary = test_utils::TestDir::new("day3");
+    let command = test_utils::string_vec(&["/bin/sh", "-c", "printf 'ok\\n'"]);
+    let read_only = test_utils::read_only_workspace(temporary.path());
     let enabled = Workspace::new(
-        make_policy(temporary.path(), true, vec![command]),
+        test_utils::policy(temporary.path(), true, vec![command]),
         None,
-        memory_store(),
+        test_utils::memory_store(),
     );
 
     assert_eq!(
@@ -172,10 +99,10 @@ fn test_task_1_policy_enables_only_explicit_effects() {
 
 #[test]
 fn test_task_2_mutations_require_read_preflight_and_approval() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day3");
     let source = temporary.path().join("app.py");
     fs::write(&source, "answer = 1\n").unwrap();
-    let mut read_only = read_only_workspace(temporary.path());
+    let mut read_only = test_utils::read_only_workspace(temporary.path());
     read_only.read_file("app.py").unwrap();
     let error = read_only.edit_file("app.py", "1", "2").unwrap_err();
     assert!(error.to_string().contains("writes are not enabled"));
@@ -184,14 +111,14 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
     let approvals = Rc::new(RefCell::new(Vec::<ToolAction>::new()));
     let approvals_for_callback = Rc::clone(&approvals);
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), true, Vec::new()),
+        test_utils::policy(temporary.path(), true, Vec::new()),
         Some(Box::new(move |action| {
             approvals_for_callback.borrow_mut().push(action.clone());
             ConfirmResult::Approved(false)
         })),
-        memory_store(),
+        test_utils::memory_store(),
     );
-    let edit = tool_action(
+    let edit = test_utils::tool_action(
         "edit_file",
         json!({"path": "app.py", "old": "1", "new": "2"}),
     );
@@ -211,21 +138,21 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
 
 #[test]
 fn test_task_3_rechecks_stale_bytes_after_approval() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day3");
     let source = temporary.path().join("app.py");
     fs::write(&source, "answer = 1\n").unwrap();
     let source_for_callback = source.clone();
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), true, Vec::new()),
+        test_utils::policy(temporary.path(), true, Vec::new()),
         Some(Box::new(move |_action| {
             fs::write(&source_for_callback, "answer = 9\n").unwrap();
             ConfirmResult::Approved(true)
         })),
-        memory_store(),
+        test_utils::memory_store(),
     );
     workspace.read_file("app.py").unwrap();
     let result = workspace.execute(
-        &tool_action(
+        &test_utils::tool_action(
             "edit_file",
             json!({"path": "app.py", "old": "1", "new": "2"}),
         ),
@@ -239,7 +166,7 @@ fn test_task_3_rechecks_stale_bytes_after_approval() {
 
 #[test]
 fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day3");
     let source = temporary.path().join("app.py");
     fs::write(&source, "answer = 1\n").unwrap();
     // A hard link detects in-place rewrites without a production test hook.
@@ -248,13 +175,13 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
     let store_path = temporary.path().join("receipts.jsonl");
     let store = ReceiptStore::new(Some(store_path.clone())).unwrap();
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), true, Vec::new()),
+        test_utils::policy(temporary.path(), true, Vec::new()),
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
         store,
     );
     workspace.read_file("app.py").unwrap();
     let result = workspace.execute(
-        &tool_action(
+        &test_utils::tool_action(
             "edit_file",
             json!({"path": "./app.py", "old": "1", "new": "2"}),
         ),
@@ -288,14 +215,15 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
 
 #[test]
 fn test_task_5_write_creates_new_files_but_observes_existing_files() {
-    let temporary = TestDirectory::new();
-    let store = memory_store();
+    let temporary = test_utils::TestDir::new("day3");
+    let store = test_utils::memory_store();
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), true, Vec::new()),
+        test_utils::policy(temporary.path(), true, Vec::new()),
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
         store,
     );
-    let create = tool_action("write_file", json!({"path": "new.txt", "content": "new\n"}));
+    let create =
+        test_utils::tool_action("write_file", json!({"path": "new.txt", "content": "new\n"}));
 
     assert_eq!(
         workspace.execute(&create, Some("write-new")),
@@ -306,14 +234,14 @@ fn test_task_5_write_creates_new_files_but_observes_existing_files() {
         "new\n"
     );
 
-    let overwrite = tool_action(
+    let overwrite = test_utils::tool_action(
         "write_file",
         json!({"path": "new.txt", "content": "replacement\n"}),
     );
     let mut other = Workspace::new(
-        make_policy(temporary.path(), true, Vec::new()),
+        test_utils::policy(temporary.path(), true, Vec::new()),
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
-        memory_store(),
+        test_utils::memory_store(),
     );
     assert!(
         other
@@ -326,13 +254,13 @@ fn test_task_5_write_creates_new_files_but_observes_existing_files() {
 
 #[test]
 fn test_task_6_validation_uses_exact_argv_and_records_output() {
-    let temporary = TestDirectory::new();
-    let allowed = string_vec(&["/bin/sh", "-c", "printf 'focused fail\\n'; exit 3"]);
+    let temporary = test_utils::TestDir::new("day3");
+    let allowed = test_utils::string_vec(&["/bin/sh", "-c", "printf 'focused fail\\n'; exit 3"]);
     let approvals = Rc::new(RefCell::new(Vec::<ToolAction>::new()));
     let approvals_for_callback = Rc::clone(&approvals);
-    let store = memory_store();
+    let store = test_utils::memory_store();
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), false, vec![allowed.clone()]),
+        test_utils::policy(temporary.path(), false, vec![allowed.clone()]),
         Some(Box::new(move |action| {
             approvals_for_callback.borrow_mut().push(action.clone());
             ConfirmResult::Approved(true)
@@ -341,18 +269,18 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
     );
 
     let denied = workspace.execute(
-        &tool_action("run_command", json!({"argv": ["echo", "no"]})),
+        &test_utils::tool_action("run_command", json!({"argv": ["echo", "no"]})),
         None,
     );
     let nul_denied = workspace.execute(
-        &tool_action(
+        &test_utils::tool_action(
             "run_command",
             json!({"argv": ["/bin/sh", "bad\u{0}argument"]}),
         ),
         None,
     );
     let result = workspace.execute(
-        &tool_action("run_command", json!({"argv": allowed})),
+        &test_utils::tool_action("run_command", json!({"argv": allowed})),
         Some("validate-1"),
     );
     let receipt = workspace.receipt_store.get("validate-1").unwrap();
@@ -366,7 +294,7 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
     assert_eq!(result, "status: 3\noutput:\nfocused fail\n");
     assert_eq!(
         receipt.arguments,
-        json_arguments(json!({
+        test_utils::json_arguments(json!({
             "argv": ["/bin/sh", "-c", "printf 'focused fail\\n'; exit 3"]
         }))
     );
@@ -377,18 +305,18 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
 
 #[test]
 fn test_task_7_duplicate_call_ids_do_not_repeat_an_effect() {
-    let temporary = TestDirectory::new();
-    let allowed = string_vec(&[
+    let temporary = test_utils::TestDir::new("day3");
+    let allowed = test_utils::string_vec(&[
         "/bin/sh",
         "-c",
         "printf x >> command-count; printf 'pass\\n'",
     ]);
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), false, vec![allowed.clone()]),
+        test_utils::policy(temporary.path(), false, vec![allowed.clone()]),
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
-        memory_store(),
+        test_utils::memory_store(),
     );
-    let action = tool_action("run_command", json!({"argv": allowed}));
+    let action = test_utils::tool_action("run_command", json!({"argv": allowed}));
 
     let first = workspace.execute(&action, Some("same-call"));
     let second = workspace.execute(&action, Some("same-call"));
@@ -401,7 +329,7 @@ fn test_task_7_duplicate_call_ids_do_not_repeat_an_effect() {
         "an idempotent retry must not execute the command again"
     );
     let conflict = workspace.execute(
-        &tool_action("run_command", json!({"argv": ["different"]})),
+        &test_utils::tool_action("run_command", json!({"argv": ["different"]})),
         Some("same-call"),
     );
     assert!(conflict.contains("already used"));
@@ -409,12 +337,12 @@ fn test_task_7_duplicate_call_ids_do_not_repeat_an_effect() {
 
 #[test]
 fn test_task_8_jsonl_receipts_reopen_and_detect_tampering() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day3");
     let path = temporary.path().join("receipts.jsonl");
     let receipt = EffectReceipt::new(
         "edit-1".to_owned(),
         "edit_file".to_owned(),
-        json_arguments(json!({"path": "app.py", "old": "1", "new": "2"})),
+        test_utils::json_arguments(json!({"path": "app.py", "old": "1", "new": "2"})),
         "ok".to_owned(),
         "edited app.py".to_owned(),
         vec!["app.py".to_owned()],
@@ -447,17 +375,20 @@ fn test_task_8_jsonl_receipts_reopen_and_detect_tampering() {
 
 #[test]
 fn test_task_9_agent_reads_edits_validates_and_finishes() {
-    let temporary = TestDirectory::new();
+    let temporary = test_utils::TestDir::new("day3");
     let source = temporary.path().join("app.py");
     fs::write(&source, "answer = 1\n").unwrap();
-    let validation = string_vec(&["/bin/sh", "-c", "printf 'answer = 2\\n' | cmp -s - app.py"]);
+    let validation =
+        test_utils::string_vec(&["/bin/sh", "-c", "printf 'answer = 2\\n' | cmp -s - app.py"]);
     let approved = Rc::new(RefCell::new(Vec::<String>::new()));
     let approved_for_callback = Rc::clone(&approved);
     let store = ReceiptStore::new(Some(temporary.path().join("receipts.jsonl"))).unwrap();
     let mut workspace = Workspace::new(
-        make_policy(temporary.path(), true, vec![validation.clone()]),
+        test_utils::policy(temporary.path(), true, vec![validation.clone()]),
         Some(Box::new(move |action| {
-            approved_for_callback.borrow_mut().push(action.tool.clone());
+            approved_for_callback
+                .borrow_mut()
+                .push(action.tool().to_owned());
             ConfirmResult::Approved(true)
         })),
         store,
@@ -506,7 +437,7 @@ fn test_task_9_agent_reads_edits_validates_and_finishes() {
     );
     assert_eq!(
         workspace.receipt_store.get("call-2").unwrap().arguments,
-        json_arguments(json!({
+        test_utils::json_arguments(json!({
             "argv": [
                 "/bin/sh",
                 "-c",

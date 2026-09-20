@@ -2,95 +2,26 @@
 
 //! Rust port of the Week 4 Day 7 observable-outcome evaluation tests.
 
-#[path = "support/temp.rs"]
-mod test_temp;
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use std::cell::{Cell, RefCell};
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::json;
+
 use tiny_llm_agent::EffectReceipt;
 use tiny_llm_agent::evaluation::ReceiptLookup;
-use tiny_llm_agent::protocol::{AgentAction, ToolAction};
-use tiny_llm_agent::workspace::{ConfirmResult, ToolPolicy, Workspace};
+use tiny_llm_agent::protocol::ToolAction;
+use tiny_llm_agent::workspace::{ConfirmResult, Workspace};
 use tiny_llm_agent::{
     AgentRun, EvaluationCase, FileExpectation, ReceiptExpectation, ReceiptStore, ResultExpectation,
     evaluate_run, run_agent,
 };
 
-static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(1);
-
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new(label: &str) -> Self {
-        let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
-        let path = test_temp::root().join(format!("tiny-llm-{label}-{}-{id}", std::process::id()));
-        fs::create_dir(&path).expect("create isolated test directory");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn policy(root: &Path, allow_writes: bool, allowed_commands: Vec<Vec<String>>) -> ToolPolicy {
-    ToolPolicy::new(
-        root.to_path_buf(),
-        ToolPolicy::DEFAULT_MAX_FILE_BYTES,
-        ToolPolicy::DEFAULT_MAX_LIST_ENTRIES,
-        allow_writes,
-        allowed_commands,
-        ToolPolicy::DEFAULT_MAX_WRITE_BYTES,
-        ToolPolicy::DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-    .expect("valid test policy")
-}
-
-fn file_expectation(path: &str, content: &str) -> FileExpectation {
-    FileExpectation::new(path.to_owned(), content.to_owned()).expect("valid file expectation")
-}
-
-fn result_expectation(tool: &str, contains: &str) -> ResultExpectation {
-    ResultExpectation::new(tool.to_owned(), contains.to_owned()).expect("valid result expectation")
-}
-
-fn receipt_expectation(
-    call_id: &str,
-    tool: &str,
-    exit_state: &str,
-    contains: &str,
-    changed: &[&str],
-) -> ReceiptExpectation {
-    ReceiptExpectation::new(
-        call_id.to_owned(),
-        tool.to_owned(),
-        exit_state.to_owned(),
-        contains.to_owned(),
-        changed.iter().map(|path| (*path).to_owned()).collect(),
-    )
-    .expect("valid receipt expectation")
-}
-
-fn action_tool(event: &tiny_llm_agent::AgentEvent) -> Option<&str> {
-    match event.action.as_ref() {
-        Some(AgentAction::Tool(action)) => Some(action.tool.as_str()),
-        _ => None,
-    }
-}
-
 struct CompletedCase {
-    _temp: TestDir,
+    _temp: test_utils::TestDir,
     run: AgentRun,
     workspace: Workspace,
     case: EvaluationCase,
@@ -98,7 +29,7 @@ struct CompletedCase {
 }
 
 fn completed_case(label: &str) -> CompletedCase {
-    let temp = TestDir::new(label);
+    let temp = test_utils::TestDir::new(label);
     fs::write(temp.path().join("app.py"), b"answer = 1\n").expect("seed app.py");
 
     let command = vec![
@@ -111,9 +42,9 @@ fn completed_case(label: &str) -> CompletedCase {
     let receipts =
         ReceiptStore::new(Some(temp.path().join("receipts.jsonl"))).expect("create receipt store");
     let mut workspace = Workspace::new(
-        policy(temp.path(), true, vec![command.clone()]),
+        test_utils::policy(temp.path(), true, vec![command.clone()]),
         Some(Box::new(move |action| {
-            seen.borrow_mut().push(action.tool.clone());
+            seen.borrow_mut().push(action.tool().to_owned());
             ConfirmResult::Approved(true)
         })),
         receipts,
@@ -141,14 +72,26 @@ fn completed_case(label: &str) -> CompletedCase {
     .expect("complete deterministic run");
     let case = EvaluationCase::new(
         "validated".to_owned(),
-        vec![file_expectation("app.py", "answer = 2\n")],
+        vec![test_utils::file_expectation("app.py", "answer = 2\n")],
         vec![
-            result_expectation("edit_file", "edited app.py"),
-            result_expectation("run_command", "validation passed"),
+            test_utils::result_expectation("edit_file", "edited app.py"),
+            test_utils::result_expectation("run_command", "validation passed"),
         ],
         vec![
-            receipt_expectation("call-1", "edit_file", "ok", "edited app.py", &["app.py"]),
-            receipt_expectation("call-2", "run_command", "ok", "validation passed", &[]),
+            test_utils::receipt_expectation(
+                "call-1",
+                "edit_file",
+                "ok",
+                "edited app.py",
+                &["app.py"],
+            ),
+            test_utils::receipt_expectation(
+                "call-2",
+                "run_command",
+                "ok",
+                "validation passed",
+                &[],
+            ),
         ],
     )
     .expect("valid evaluation case");
@@ -160,15 +103,6 @@ fn completed_case(label: &str) -> CompletedCase {
         case,
         approvals,
     }
-}
-
-fn failed_names(report: &tiny_llm_agent::EvaluationReport) -> Vec<&str> {
-    report
-        .checks
-        .iter()
-        .filter(|check| !check.passed)
-        .map(|check| check.name.as_str())
-        .collect()
 }
 
 #[test]
@@ -227,8 +161,13 @@ fn test_task_2_each_wrong_fact_fails_only_its_named_check() {
         let mut completed = completed_case(&format!("day7-wrong-{fact}"));
         match fact {
             "final" => completed.case.final_contains = "not in the final".to_owned(),
-            "file" => completed.case.files = vec![file_expectation("app.py", "wrong\n")],
-            "result" => completed.case.results[1] = result_expectation("run_command", "status: 9"),
+            "file" => {
+                completed.case.files = vec![test_utils::file_expectation("app.py", "wrong\n")]
+            }
+            "result" => {
+                completed.case.results[1] =
+                    test_utils::result_expectation("run_command", "status: 9")
+            }
             "receipt" => completed.case.receipts[0].tool = "write_file".to_owned(),
             _ => unreachable!(),
         }
@@ -240,7 +179,7 @@ fn test_task_2_each_wrong_fact_fails_only_its_named_check() {
             &completed.case,
         );
         assert!(!report.passed(), "wrong {fact} unexpectedly passed");
-        assert_eq!(failed_names(&report), [failed_name]);
+        assert_eq!(test_utils::failed_names(&report), [failed_name]);
     }
 }
 
@@ -259,7 +198,7 @@ fn test_task_2_incomplete_run_cannot_pass_from_matching_final_text() {
     );
 
     assert!(!report.passed());
-    assert_eq!(failed_names(&report), ["final"]);
+    assert_eq!(test_utils::failed_names(&report), ["final"]);
 }
 
 #[test]
@@ -278,7 +217,7 @@ fn test_task_2_file_content_requires_exact_bytes() {
         &completed.case,
     );
     assert!(!report.passed());
-    assert_eq!(failed_names(&report), ["file:app.py"]);
+    assert_eq!(test_utils::failed_names(&report), ["file:app.py"]);
 }
 
 #[test]
@@ -293,7 +232,7 @@ fn test_task_2_file_content_does_not_normalize_newlines() {
         &completed.case,
     );
     assert!(!report.passed());
-    assert_eq!(failed_names(&report), ["file:app.py"]);
+    assert_eq!(test_utils::failed_names(&report), ["file:app.py"]);
 }
 
 #[test]
@@ -309,7 +248,7 @@ fn test_task_2_invalid_utf8_is_not_ignored() {
         &completed.case,
     );
     assert!(!report.passed());
-    assert_eq!(failed_names(&report), ["file:app.py"]);
+    assert_eq!(test_utils::failed_names(&report), ["file:app.py"]);
 }
 
 #[test]
@@ -318,7 +257,10 @@ fn test_task_2_invalid_utf8_is_not_replaced() {
     fs::write(completed._temp.path().join("app.py"), b"answer = \xff2\n")
         .expect("replace evidence");
     let mut replacement_case = completed.case.clone();
-    replacement_case.files = vec![file_expectation("app.py", "answer = \u{fffd}2\n")];
+    replacement_case.files = vec![test_utils::file_expectation(
+        "app.py",
+        "answer = \u{fffd}2\n",
+    )];
 
     let report = evaluate_run(
         &completed.run,
@@ -327,15 +269,21 @@ fn test_task_2_invalid_utf8_is_not_replaced() {
         &replacement_case,
     );
     assert!(!report.passed());
-    assert_eq!(failed_names(&report), ["file:app.py"]);
+    assert_eq!(test_utils::failed_names(&report), ["file:app.py"]);
 }
 
 #[test]
 fn test_task_2_tool_and_result_must_match_the_same_event() {
     let completed = completed_case("day7-same-event");
     let mut split_evidence = completed.run.clone();
-    assert_eq!(action_tool(&split_evidence.events[0]), Some("read_file"));
-    assert_eq!(action_tool(&split_evidence.events[1]), Some("edit_file"));
+    assert_eq!(
+        test_utils::action_tool(&split_evidence.events[0]),
+        Some("read_file")
+    );
+    assert_eq!(
+        test_utils::action_tool(&split_evidence.events[1]),
+        Some("edit_file")
+    );
     split_evidence.events[0].result = Some("edited app.py".to_owned());
     split_evidence.events[1].result = Some("edit completed".to_owned());
 
@@ -346,7 +294,7 @@ fn test_task_2_tool_and_result_must_match_the_same_event() {
         &completed.case,
     );
     assert!(!report.passed());
-    assert_eq!(failed_names(&report), ["result:edit_file"]);
+    assert_eq!(test_utils::failed_names(&report), ["result:edit_file"]);
 }
 
 #[test]
@@ -372,7 +320,7 @@ fn test_task_2_each_receipt_fact_is_independently_required() {
             &changed_case,
         );
         assert!(!report.passed());
-        assert_eq!(failed_names(&report), ["receipt:call-1"]);
+        assert_eq!(test_utils::failed_names(&report), ["receipt:call-1"]);
     }
 }
 
@@ -399,8 +347,8 @@ fn test_task_4_missing_unreadable_and_absent_evidence_become_failed_checks() {
     fs::create_dir(completed._temp.path().join("folder")).expect("create non-file evidence");
     let mut unavailable = completed.case.clone();
     unavailable.files = vec![
-        file_expectation("missing.txt", "missing"),
-        file_expectation("folder", "not a file"),
+        test_utils::file_expectation("missing.txt", "missing"),
+        test_utils::file_expectation("folder", "not a file"),
     ];
     let empty_receipts = ReceiptStore::new(None).expect("empty receipt store");
 
@@ -412,7 +360,7 @@ fn test_task_4_missing_unreadable_and_absent_evidence_become_failed_checks() {
     );
 
     assert_eq!(
-        failed_names(&report),
+        test_utils::failed_names(&report),
         [
             "file:missing.txt",
             "file:folder",
@@ -450,7 +398,10 @@ fn test_task_5_tampered_receipt_log_becomes_failed_checks() {
             &completed.workspace.receipt_store,
             &completed.case,
         );
-        assert_eq!(failed_names(&report), ["receipt:call-1", "receipt:call-2"]);
+        assert_eq!(
+            test_utils::failed_names(&report),
+            ["receipt:call-1", "receipt:call-2"]
+        );
         assert!(
             report.checks[report.checks.len() - 2..]
                 .iter()
@@ -502,7 +453,10 @@ fn test_task_6_file_evidence_does_not_dispatch_the_stateful_read_tool() {
     )
     .expect("write evidence");
     let mut changed_case = completed.case.clone();
-    changed_case.files = vec![file_expectation("evidence.txt", "declared evidence\n")];
+    changed_case.files = vec![test_utils::file_expectation(
+        "evidence.txt",
+        "declared evidence\n",
+    )];
 
     let report = evaluate_run(
         &completed.run,
@@ -514,12 +468,10 @@ fn test_task_6_file_evidence_does_not_dispatch_the_stateful_read_tool() {
 
     // A stateful Workspace::read_file would authorize a subsequent edit.  A
     // failed edit therefore proves evaluation inspected bytes directly.
-    let edit = ToolAction {
-        tool: "edit_file".to_owned(),
-        arguments: json!({"path": "evidence.txt", "old": "declared", "new": "changed"})
-            .as_object()
-            .expect("object")
-            .clone(),
+    let edit = ToolAction::EditFile {
+        path: "evidence.txt".into(),
+        old: "declared".into(),
+        new: "changed".into(),
     };
     let result = completed.workspace.execute(&edit, None);
     // .expect("tool errors remain model-visible");
@@ -559,7 +511,10 @@ fn test_task_7_invalid_evaluation_specifications_fail_closed() {
 
     let error = EvaluationCase::new(
         "done".to_owned(),
-        vec![file_expectation("a/b", "1"), file_expectation("a//b", "2")],
+        vec![
+            test_utils::file_expectation("a/b", "1"),
+            test_utils::file_expectation("a//b", "2"),
+        ],
         vec![],
         vec![],
     )
@@ -571,8 +526,8 @@ fn test_task_7_invalid_evaluation_specifications_fail_closed() {
         vec![],
         vec![],
         vec![
-            receipt_expectation("call-1", "edit_file", "ok", "edited", &[]),
-            receipt_expectation("call-1", "run_command", "ok", "status", &[]),
+            test_utils::receipt_expectation("call-1", "edit_file", "ok", "edited", &[]),
+            test_utils::receipt_expectation("call-1", "run_command", "ok", "status", &[]),
         ],
     )
     .unwrap_err();
@@ -611,7 +566,10 @@ fn test_task_7_receipt_lookup_errors_become_failed_checks() {
         &completed.case,
     );
 
-    assert_eq!(failed_names(&report), ["receipt:call-1", "receipt:call-2"]);
+    assert_eq!(
+        test_utils::failed_names(&report),
+        ["receipt:call-1", "receipt:call-2"]
+    );
     assert!(
         report.checks[report.checks.len() - 2..]
             .iter()
