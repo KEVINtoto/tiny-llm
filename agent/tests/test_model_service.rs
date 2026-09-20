@@ -1,10 +1,14 @@
+#[path = "./support/utils.rs"]
+mod test_utils;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tiny_llm_agent::generation::{Generate, Message};
+
+use tiny_llm_agent::generation::Generate;
 use tiny_llm_agent::model_service::HttpGenerator;
 
 fn mock_service(
@@ -53,13 +57,6 @@ fn mock_service(
     (url, handle)
 }
 
-fn message(role: &str, content: &str) -> Message {
-    Message::from([
-        ("role".into(), role.into()),
-        ("content".into(), content.into()),
-    ])
-}
-
 #[test]
 fn sends_complete_messages_on_each_call_and_preserves_raw_response() {
     let raw = "  <think>思考</think>\n{\"final\":\"完成\"}\n";
@@ -67,15 +64,15 @@ fn sends_complete_messages_on_each_call_and_preserves_raw_response() {
     let (url, server) = mock_service(vec![(200, body.clone()), (200, body)], Duration::ZERO);
     let mut generator = HttpGenerator::new(&url, 42, true, Duration::from_secs(5)).unwrap();
     let mut messages = vec![
-        message("system", "instructions"),
-        message("user", "检查文件"),
+        test_utils::message("system", "instructions"),
+        test_utils::message("user", "检查文件"),
     ];
     assert_eq!(generator.generate(&messages).unwrap(), raw);
-    messages.push(message(
+    messages.push(test_utils::message(
         "assistant",
         r#"{"tool":"read_file","path":"README.md"}"#,
     ));
-    messages.push(message("user", "Tool result:\nfile contents"));
+    messages.push(test_utils::message("user", "Tool result:\nfile contents"));
     assert_eq!(generator.generate(&messages).unwrap(), raw);
     let requests = server.join().unwrap();
     assert_eq!(requests.len(), 2);
@@ -102,7 +99,9 @@ fn reports_service_and_protocol_errors_without_retrying() {
     ] {
         let (url, server) = mock_service(vec![(status, body.into())], Duration::ZERO);
         let mut generator = HttpGenerator::new(&url, 256, false, Duration::from_secs(5)).unwrap();
-        let error = generator.generate(&[message("user", "task")]).unwrap_err();
+        let error = generator
+            .generate(&[test_utils::message("user", "task")])
+            .unwrap_err();
         assert!(error.0.contains(expected), "{error}");
         assert_eq!(server.join().unwrap().len(), 1);
     }
@@ -116,7 +115,7 @@ fn reports_connection_failure() {
     let mut generator = HttpGenerator::new(&url, 256, false, Duration::from_secs(1)).unwrap();
     assert!(
         generator
-            .generate(&[message("user", "task")])
+            .generate(&[test_utils::message("user", "task")])
             .unwrap_err()
             .0
             .contains("request failed")
@@ -130,7 +129,11 @@ fn times_out_slow_generation() {
         Duration::from_millis(250),
     );
     let mut generator = HttpGenerator::new(&url, 256, false, Duration::from_millis(50)).unwrap();
-    assert!(generator.generate(&[message("user", "task")]).is_err());
+    assert!(
+        generator
+            .generate(&[test_utils::message("user", "task")])
+            .is_err()
+    );
     assert_eq!(server.join().unwrap().len(), 1);
 }
 

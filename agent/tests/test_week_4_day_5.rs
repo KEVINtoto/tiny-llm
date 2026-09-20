@@ -2,40 +2,23 @@
 
 //! Week 4 Day 5 receipt-backed context-compaction course-code tests.
 
-use std::collections::{HashMap, HashSet};
+#[path = "./support/utils.rs"]
+mod test_utils;
 
-use serde_json::{Map, Value, json};
+use std::collections::HashSet;
+
+use serde_json::json;
+
 use tiny_llm_agent::generation::Message;
 use tiny_llm_agent::protocol::AgentAction;
 use tiny_llm_agent::{EffectReceipt, FinalAction, compact_completed_interactions, parse_action};
-
-fn message(role: &str, content: impl Into<String>) -> Message {
-    HashMap::from([
-        ("role".to_owned(), role.to_owned()),
-        ("content".to_owned(), content.into()),
-    ])
-}
-
-fn arguments(value: Value) -> Map<String, Value> {
-    value
-        .as_object()
-        .expect("test receipt arguments must be a JSON object")
-        .clone()
-}
-
-fn count_fake_tokens(messages: &[Message]) -> i64 {
-    messages
-        .iter()
-        .map(|message| message["content"].chars().count() as i64)
-        .sum()
-}
 
 fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
     let command_result = format!("status: 0\noutput:\n{}", "validation detail\n".repeat(200));
     let command = EffectReceipt::new(
         "call-1".to_owned(),
         "run_command".to_owned(),
-        arguments(json!({"argv": ["python", "validate.py"]})),
+        test_utils::json_arguments(json!({"argv": ["python", "validate.py"]})),
         "ok".to_owned(),
         command_result,
         vec![],
@@ -44,21 +27,21 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
     let edit = EffectReceipt::new(
         "call-2".to_owned(),
         "edit_file".to_owned(),
-        arguments(json!({"path": "app.py", "old": "1", "new": "2"})),
+        test_utils::json_arguments(json!({"path": "app.py", "old": "1", "new": "2"})),
         "ok".to_owned(),
         "edited app.py".to_owned(),
         vec!["app.py".to_owned()],
     )
     .unwrap();
     let messages = vec![
-        message("system", "Use one JSON action."),
-        message("user", "Fix and validate app.py."),
-        message(
+        test_utils::message("system", "Use one JSON action."),
+        test_utils::message("user", "Fix and validate app.py."),
+        test_utils::message(
             "assistant",
             json!({"tool": command.tool, "argv": ["python", "validate.py"]}).to_string(),
         ),
-        message("user", format!("Tool result:\n{}", command.result)),
-        message(
+        test_utils::message("user", format!("Tool result:\n{}", command.result)),
+        test_utils::message(
             "assistant",
             json!({
                 "tool": edit.tool,
@@ -68,7 +51,7 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
             })
             .to_string(),
         ),
-        message("user", format!("Tool result:\n{}", edit.result)),
+        test_utils::message("user", format!("Tool result:\n{}", edit.result)),
     ];
     (messages, command, edit)
 }
@@ -80,7 +63,7 @@ fn test_task_1_compacts_old_effect_and_keeps_recent_interaction_visible() {
     let result = compact_completed_interactions(
         &messages,
         &[command.clone(), edit],
-        &count_fake_tokens,
+        &test_utils::count_fake_tokens,
         1,
         80,
     )
@@ -88,8 +71,14 @@ fn test_task_1_compacts_old_effect_and_keeps_recent_interaction_visible() {
 
     assert_eq!(result.compacted_interactions, 1);
     assert_eq!(result.receipt_ids, vec![command.receipt_id()]);
-    assert_eq!(result.tokens_before, count_fake_tokens(&messages));
-    assert_eq!(result.tokens_after, count_fake_tokens(&result.messages));
+    assert_eq!(
+        result.tokens_before,
+        test_utils::count_fake_tokens(&messages)
+    );
+    assert_eq!(
+        result.tokens_after,
+        test_utils::count_fake_tokens(&result.messages)
+    );
     assert!(result.saved_tokens() > 0);
     assert_eq!(&result.messages[..2], &messages[..2]);
     assert_eq!(
@@ -105,7 +94,7 @@ fn test_task_2_compact_record_retains_the_evidence_needed_for_a_final_answer() {
     let result = compact_completed_interactions(
         &messages,
         &[command.clone(), edit],
-        &count_fake_tokens,
+        &test_utils::count_fake_tokens,
         1,
         80,
     )
@@ -142,7 +131,7 @@ fn test_task_3_requires_exact_receipt_evidence_and_preserves_the_input() {
         EffectReceipt::new(
             command.tool_call_id.clone(),
             command.tool.clone(),
-            arguments(json!({"argv": ["python", "other.py"]})),
+            test_utils::json_arguments(json!({"argv": ["python", "other.py"]})),
             command.exit_state.clone(),
             command.result.clone(),
             vec![],
@@ -160,9 +149,14 @@ fn test_task_3_requires_exact_receipt_evidence_and_preserves_the_input() {
     ];
 
     for mismatched in mismatches {
-        let result =
-            compact_completed_interactions(&messages, &[mismatched], &count_fake_tokens, 0, 160)
-                .unwrap();
+        let result = compact_completed_interactions(
+            &messages,
+            &[mismatched],
+            &test_utils::count_fake_tokens,
+            0,
+            160,
+        )
+        .unwrap();
         assert_eq!(result.compacted_interactions, 0);
         assert_eq!(result.messages, before);
     }
@@ -173,28 +167,34 @@ fn test_task_3_requires_exact_receipt_evidence_and_preserves_the_input() {
 fn test_task_4_leaves_unreceipted_tool_observations_verbatim() {
     let result_text = "project fact\n".repeat(200);
     let messages = vec![
-        message("system", "system"),
-        message("user", "inspect"),
-        message("assistant", r#"{"tool":"read_file","path":"README.md"}"#),
-        message("user", format!("Tool result:\n{result_text}")),
+        test_utils::message("system", "system"),
+        test_utils::message("user", "inspect"),
+        test_utils::message("assistant", r#"{"tool":"read_file","path":"README.md"}"#),
+        test_utils::message("user", format!("Tool result:\n{result_text}")),
     ];
 
     let result =
-        compact_completed_interactions(&messages, &[], &count_fake_tokens, 0, 160).unwrap();
+        compact_completed_interactions(&messages, &[], &test_utils::count_fake_tokens, 0, 160)
+            .unwrap();
 
     assert_eq!(result.compacted_interactions, 0);
     assert_eq!(result.messages, messages);
     assert_eq!(result.saved_tokens(), 0);
 
     let mut incomplete = messages[..2].to_vec();
-    incomplete.push(message(
+    incomplete.push(test_utils::message(
         "assistant",
         r#"{"tool":"run_command","argv":["python","validate.py"]}"#,
     ));
     let (_, command, _) = completed_effects();
-    let result =
-        compact_completed_interactions(&incomplete, &[command], &count_fake_tokens, 0, 160)
-            .unwrap();
+    let result = compact_completed_interactions(
+        &incomplete,
+        &[command],
+        &test_utils::count_fake_tokens,
+        0,
+        160,
+    )
+    .unwrap();
     assert_eq!(result.compacted_interactions, 0);
     assert_eq!(result.messages, incomplete);
 }
@@ -205,7 +205,7 @@ fn test_task_5_compacted_view_continues_through_the_existing_model_protocol() {
     let result = compact_completed_interactions(
         &messages,
         &[command.clone(), edit],
-        &count_fake_tokens,
+        &test_utils::count_fake_tokens,
         1,
         80,
     )
@@ -234,10 +234,16 @@ fn test_task_6_compaction_is_idempotent_and_validates_its_small_policy() {
     let (messages, command, edit) = completed_effects();
     let receipts = [command, edit];
     let first =
-        compact_completed_interactions(&messages, &receipts, &count_fake_tokens, 1, 80).unwrap();
-    let second =
-        compact_completed_interactions(&first.messages, &receipts, &count_fake_tokens, 0, 80)
+        compact_completed_interactions(&messages, &receipts, &test_utils::count_fake_tokens, 1, 80)
             .unwrap();
+    let second = compact_completed_interactions(
+        &first.messages,
+        &receipts,
+        &test_utils::count_fake_tokens,
+        0,
+        80,
+    )
+    .unwrap();
 
     assert_eq!(second.compacted_interactions, 0);
     assert_eq!(second.messages, first.messages);
@@ -247,10 +253,12 @@ fn test_task_6_compaction_is_idempotent_and_validates_its_small_policy() {
     assert_eq!(no_savings.tokens_after, 10);
 
     let error =
-        compact_completed_interactions(&messages, &[], &count_fake_tokens, -1, 160).unwrap_err();
+        compact_completed_interactions(&messages, &[], &test_utils::count_fake_tokens, -1, 160)
+            .unwrap_err();
     assert!(error.to_string().contains("keep_recent"));
     let error =
-        compact_completed_interactions(&messages, &[], &count_fake_tokens, 1, 0).unwrap_err();
+        compact_completed_interactions(&messages, &[], &test_utils::count_fake_tokens, 1, 0)
+            .unwrap_err();
     assert!(error.to_string().contains("result_preview_chars"));
     // Rust's counter type excludes Python's `bool`; a negative integer covers
     // the remaining invalid-result branch of the same contract.

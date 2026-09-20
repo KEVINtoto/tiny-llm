@@ -3,17 +3,19 @@
 //! Rust declarations are checked with syn, rather than identifier substrings.
 //! The supplied CLI and capstone are still Python files; their static guards
 //! inspect those actual artifacts. No Python reference implementation is run.
-#[path = "support/temp.rs"]
-mod test_temp;
+
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+
 use syn::parse::Parser;
 use syn::{ImplItem, Item, Visibility};
-use test_temp::tempdir;
+
 use tiny_llm_agent::generation::Message;
 use tiny_llm_agent::workspace::ConfirmResult;
 use tiny_llm_agent::{
@@ -22,9 +24,9 @@ use tiny_llm_agent::{
 use tiny_llm_agent::{checkpoint, generation, protocol};
 
 // Compile the original helper as test-local source so its private observation
-// boundary can be mutation-tested without changing agent/lib.rs or loop.rs.
+// boundary can be mutation-tested without changing agent/src/lib.rs or loop.rs.
 #[allow(dead_code, unused_variables)]
-#[path = "../loop.rs"]
+#[path = "../src/loop.rs"]
 mod learner_loop;
 
 const MODULES: [&str; 13] = [
@@ -44,10 +46,10 @@ const MODULES: [&str; 13] = [
 ];
 
 fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    test_utils::repository_root()
 }
 fn source(module: &str) -> String {
-    fs::read_to_string(root().join("agent").join(format!("{module}.rs"))).unwrap()
+    fs::read_to_string(root().join("agent/src").join(format!("{module}.rs"))).unwrap()
 }
 fn tree(module: &str) -> syn::File {
     syn::parse_file(&source(module)).unwrap()
@@ -223,7 +225,7 @@ fn test_starter_public_contract_matches_reference() {
                 "ToolAction",
                 "AgentAction",
                 "AgentWorkspace",
-                "TOOL_FIELDS",
+                "action_schema",
                 "parse_action",
                 "build_system_prompt",
             ],
@@ -381,7 +383,7 @@ fn test_package_exports_match_the_published_day_9_surface() {
 
 #[test]
 fn test_only_day_1_through_day_9_modules_exist_in_the_starter() {
-    let actual: BTreeSet<_> = fs::read_dir(root().join("agent"))
+    let actual: BTreeSet<_> = fs::read_dir(root().join("agent/src"))
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "rs"))
@@ -531,7 +533,7 @@ fn test_day_9_bounded_evidence_surface_is_complete_and_has_no_future_api() {
 
 #[test]
 fn test_day_9_starter_range_cap_can_hold_one_max_width_utf8_character() {
-    let temp = tempdir().unwrap();
+    let temp = test_utils::tempdir().unwrap();
     for max_range_bytes in [1, 2, 3, 4] {
         let policy = ToolPolicy {
             root: temp.path().to_path_buf(),
@@ -593,7 +595,7 @@ fn test_real_model_cli_exposes_only_the_learner_package() {
 
 #[test]
 fn test_real_model_cli_discloses_command_side_effect_scope() {
-    let temp = tempdir().unwrap();
+    let temp = test_utils::tempdir().unwrap();
     let command = vec!["/usr/bin/touch".to_owned(), "extra".to_owned()];
     let mut workspace = Workspace::new(
         ToolPolicy::new(
@@ -609,13 +611,7 @@ fn test_real_model_cli_discloses_command_side_effect_scope() {
         Some(Box::new(|_| ConfirmResult::Approved(true))),
         ReceiptStore::new(None).unwrap(),
     );
-    let action = ToolAction {
-        tool: "run_command".into(),
-        arguments: serde_json::json!({"argv": command})
-            .as_object()
-            .unwrap()
-            .clone(),
-    };
+    let action = ToolAction::RunCommand { argv: command };
     let result = workspace.execute(&action, None);
     assert!(temp.path().join("extra").is_file());
     assert!(result.starts_with("status: 0"));

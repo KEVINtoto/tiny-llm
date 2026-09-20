@@ -2,45 +2,23 @@
 
 //! Week 4 Day 4 checkpoint-and-resume course-code tests.
 
-#[path = "support/temp.rs"]
-mod test_temp;
+#[path = "./support/utils.rs"]
+mod test_utils;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::rc::Rc;
 
 use serde_json::json;
-use test_temp::tempdir;
+use test_utils::tempdir;
 use tiny_llm_agent::generation::{Generate, Message};
 use tiny_llm_agent::protocol::AgentError;
 use tiny_llm_agent::workspace::{ConfirmResult, ConfirmTool};
 use tiny_llm_agent::{
-    AgentCheckpoint, ModelCheckpoint, ReceiptStore, ToolPolicy, Workspace, create_checkpoint,
-    resume_agent, run_to_checkpoint,
+    AgentCheckpoint, ModelCheckpoint, ReceiptStore, Workspace, create_checkpoint, resume_agent,
+    run_to_checkpoint,
 };
-
-fn policy(root: &Path, allow_writes: bool, allowed_commands: Vec<Vec<String>>) -> ToolPolicy {
-    ToolPolicy::new(
-        root.to_path_buf(),
-        ToolPolicy::DEFAULT_MAX_FILE_BYTES,
-        ToolPolicy::DEFAULT_MAX_LIST_ENTRIES,
-        allow_writes,
-        allowed_commands,
-        ToolPolicy::DEFAULT_MAX_WRITE_BYTES,
-        ToolPolicy::DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-    .unwrap()
-}
-
-fn workspace(root: &Path) -> Workspace {
-    Workspace::new(
-        policy(root, false, vec![]),
-        None,
-        ReceiptStore::new(None).unwrap(),
-    )
-}
 
 struct FakeCheckpointModel {
     responses: Vec<String>,
@@ -59,19 +37,15 @@ impl FakeCheckpointModel {
             restored: None,
         }
     }
-
-    fn tokens(messages: &[Message]) -> Vec<i64> {
-        messages
-            .iter()
-            .map(|message| message["content"].chars().count() as i64)
-            .collect()
-    }
 }
 
 impl Generate for FakeCheckpointModel {
     fn generate(&mut self, messages: &[Message]) -> Result<String, AgentError> {
         if let Some(restored) = self.restored.take() {
-            assert_eq!(Self::tokens(messages), restored.cached_token_ids);
+            assert_eq!(
+                test_utils::fake_token_ids(messages),
+                restored.cached_token_ids
+            );
             assert_eq!(messages.len() as i64, restored.conversation_position);
         }
         let response = self
@@ -84,7 +58,7 @@ impl Generate for FakeCheckpointModel {
     }
 
     fn save_checkpoint(&mut self, messages: &[Message]) -> Result<ModelCheckpoint, AgentError> {
-        let tokens = Self::tokens(messages);
+        let tokens = test_utils::fake_token_ids(messages);
         ModelCheckpoint::new(
             messages.len() as i64,
             self.response_index as i64,
@@ -100,23 +74,15 @@ impl Generate for FakeCheckpointModel {
     }
 }
 
-fn assert_error_contains<T: std::fmt::Debug>(result: Result<T, AgentError>, expected: &str) {
-    let error = result.expect_err("operation unexpectedly succeeded");
-    assert!(
-        error.to_string().contains(expected),
-        "expected error containing {expected:?}, got {error}"
-    );
-}
-
 #[test]
 fn test_task_1_model_checkpoint_has_one_aligned_fake_cache_snapshot() {
     let checkpoint = ModelCheckpoint::new(4, 2, vec![11, 12, 13], vec![3, 3]).unwrap();
 
     assert_eq!(checkpoint.conversation_position, 4);
     assert_eq!(checkpoint.response_index, 2);
-    assert_error_contains(ModelCheckpoint::new(-1, 0, vec![], vec![0]), "positions");
-    assert_error_contains(ModelCheckpoint::new(1, 0, vec![-1], vec![1]), "token ids");
-    assert_error_contains(
+    test_utils::assert_error_contains(ModelCheckpoint::new(-1, 0, vec![], vec![0]), "positions");
+    test_utils::assert_error_contains(ModelCheckpoint::new(1, 0, vec![-1], vec![1]), "token ids");
+    test_utils::assert_error_contains(
         ModelCheckpoint::new(1, 0, vec![1], vec![0, 1]),
         "layer offsets",
     );
@@ -148,45 +114,45 @@ fn test_task_2_agent_checkpoint_binds_task_messages_and_model_state() {
         conversation_position: 3,
         ..model
     };
-    assert_error_contains(
+    test_utils::assert_error_contains(
         create_checkpoint("inspect", &messages, mismatched_model),
         "conversation",
     );
 
     let mut changed = checkpoint.clone();
     changed.task = "different".to_owned();
-    assert_error_contains(changed.validate(), "identity");
+    test_utils::assert_error_contains(changed.validate(), "identity");
 
     let mut changed = checkpoint.clone();
     changed.messages[1] = ("user".to_owned(), "respect".to_owned());
     assert_eq!(changed.messages[1].1.len(), checkpoint.messages[1].1.len());
-    assert_error_contains(changed.validate(), "identity");
+    test_utils::assert_error_contains(changed.validate(), "identity");
 
     let mut changed = checkpoint.clone();
     changed.model.response_index = 1;
-    assert_error_contains(changed.validate(), "identity");
+    test_utils::assert_error_contains(changed.validate(), "identity");
 
     let mut changed = checkpoint.clone();
     changed.model.cached_token_ids = vec![6, 8];
-    assert_error_contains(changed.validate(), "identity");
+    test_utils::assert_error_contains(changed.validate(), "identity");
 
     let mut changed = checkpoint.clone();
     changed.model.layer_offsets = vec![2, 2];
-    assert_error_contains(changed.validate(), "identity");
+    test_utils::assert_error_contains(changed.validate(), "identity");
 
     // A tuple of the wrong arity cannot be represented by the Rust field type;
     // an invalid role exercises the corresponding malformed-message check.
     let mut changed = checkpoint;
     changed.messages = vec![("invalid".to_owned(), "message".to_owned())];
     changed.model.conversation_position = 1;
-    assert_error_contains(changed.validate(), "messages");
+    test_utils::assert_error_contains(changed.validate(), "messages");
 }
 
 #[test]
 fn test_task_3_checkpoint_is_saved_after_the_complete_tool_observation() {
     let directory = tempdir().unwrap();
     fs::write(directory.path().join("README.md"), "hello\n").unwrap();
-    let mut workspace = workspace(directory.path());
+    let mut workspace = test_utils::read_only_workspace(directory.path());
     let mut model = FakeCheckpointModel::new(&[r#"{"tool":"read_file","path":"README.md"}"#]);
 
     let checkpoint = run_to_checkpoint("inspect", &mut model, &mut workspace, 1, None).unwrap();
@@ -213,23 +179,23 @@ fn test_task_3_checkpoint_is_saved_after_the_complete_tool_observation() {
 #[test]
 fn test_task_4_checkpoint_api_fails_clearly_before_a_boundary() {
     let directory = tempdir().unwrap();
-    let mut workspace = workspace(directory.path());
+    let mut workspace = test_utils::read_only_workspace(directory.path());
 
     let mut empty = FakeCheckpointModel::new(&[]);
-    assert_error_contains(
+    test_utils::assert_error_contains(
         run_to_checkpoint("inspect", &mut empty, &mut workspace, 0, None),
         "positive integer",
     );
 
     let mut final_only = FakeCheckpointModel::new(&[r#"{"final":"done"}"#]);
-    assert_error_contains(
+    test_utils::assert_error_contains(
         run_to_checkpoint("inspect", &mut final_only, &mut workspace, 1, None),
         "ended before checkpoint",
     );
 
     let mut plain_generate =
         |_messages: &[Message]| r#"{"tool":"list_files","path":"."}"#.to_owned();
-    assert_error_contains(
+    test_utils::assert_error_contains(
         run_to_checkpoint("inspect", &mut plain_generate, &mut workspace, 1, None),
         "does not support checkpoints",
     );
@@ -238,20 +204,20 @@ fn test_task_4_checkpoint_api_fails_clearly_before_a_boundary() {
 #[test]
 fn test_task_5_resume_requires_valid_content_and_a_restorable_model() {
     let directory = tempdir().unwrap();
-    let mut workspace = workspace(directory.path());
+    let mut workspace = test_utils::read_only_workspace(directory.path());
     let mut model = FakeCheckpointModel::new(&[r#"{"tool":"list_files","path":"."}"#]);
     let checkpoint = run_to_checkpoint("inspect", &mut model, &mut workspace, 1, None).unwrap();
 
     let mut invalid = checkpoint.clone();
     invalid.checkpoint_id = "0".repeat(64);
     let mut fresh = FakeCheckpointModel::new(&[]);
-    assert_error_contains(
+    test_utils::assert_error_contains(
         resume_agent(&invalid, &mut fresh, &mut workspace, None),
         "identity",
     );
 
     let mut plain_generate = |_messages: &[Message]| r#"{"final":"done"}"#.to_owned();
-    assert_error_contains(
+    test_utils::assert_error_contains(
         resume_agent(&checkpoint, &mut plain_generate, &mut workspace, None),
         "checkpoint restore",
     );
@@ -260,7 +226,7 @@ fn test_task_5_resume_requires_valid_content_and_a_restorable_model() {
 #[test]
 fn test_task_6_fresh_model_restores_the_exact_next_response() {
     let directory = tempdir().unwrap();
-    let mut workspace = workspace(directory.path());
+    let mut workspace = test_utils::read_only_workspace(directory.path());
     let responses = [
         r#"{"tool":"list_files","path":"."}"#,
         r#"{"final":"resumed after listing"}"#,
@@ -291,13 +257,15 @@ fn test_task_7_edit_checkpoint_resume_validates_without_replaying_effect() {
     let approvals = Rc::new(RefCell::new(Vec::<String>::new()));
     let captured_approvals = Rc::clone(&approvals);
     let confirm: ConfirmTool = Box::new(move |action| {
-        captured_approvals.borrow_mut().push(action.tool.clone());
+        captured_approvals
+            .borrow_mut()
+            .push(action.tool().to_owned());
         ConfirmResult::Approved(true)
     });
     let receipts_path = directory.path().join("receipts.jsonl");
     let receipts = ReceiptStore::new(Some(receipts_path)).unwrap();
     let mut workspace = Workspace::new(
-        policy(directory.path(), true, vec![validation.clone()]),
+        test_utils::policy(directory.path(), true, vec![validation.clone()]),
         Some(confirm),
         receipts.clone(),
     );

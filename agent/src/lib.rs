@@ -35,7 +35,9 @@ pub use crate::generation::{generate_response, initial_messages};
 pub use crate::r#loop::{
     AgentEvent, AgentLimits, AgentRun, resume_agent, run_agent, run_to_checkpoint,
 };
-pub use crate::protocol::{AgentError, FinalAction, ToolAction, build_system_prompt, parse_action};
+pub use crate::protocol::{
+    AgentError, FinalAction, ToolAction, action_schema, build_system_prompt, parse_action,
+};
 pub use crate::receipts::{EffectReceipt, ReceiptStore};
 pub use crate::steering::{AgentStatus, inspect_checkpoint, resume_with_steering};
 pub use crate::workspace::{ApprovalDecision, ToolPolicy, Workspace};

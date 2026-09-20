@@ -132,7 +132,7 @@ fn payload(text: &str, prefix: &str) -> Value {
 }
 
 pub fn run_capstone() -> Value {
-    let temp = crate::test_temp::tempdir().unwrap();
+    let temp = crate::test_utils::tempdir().unwrap();
     let base = temp.path().join("base");
     fs::create_dir_all(base.join("workspace")).unwrap();
     let build_log = format!(
@@ -275,7 +275,7 @@ pub fn run_capstone() -> Value {
     assert!(!failing.report.passed());
     let selected = select_branch(&[passing.clone(), failing.clone()], "validate-only").unwrap();
     assert!(selected.run.events.iter().all(
-        |e| !matches!(&e.action, Some(protocol::AgentAction::Tool(a)) if a.tool == "edit_file")
+        |e| !matches!(&e.action, Some(protocol::AgentAction::Tool(a)) if a.tool() == "edit_file")
     ));
     assert!(
         fs::read(passing_root.join("receipts.jsonl"))

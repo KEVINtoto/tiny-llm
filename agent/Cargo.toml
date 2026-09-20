@@ -1,0 +1,24 @@
+[package]
+name = "tiny-llm-agent"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "agent-cli"
+path = "src/cli.rs"
+
+[dependencies]
+clap.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+schemars.workspace = true
+sha2.workspace = true
+shlex.workspace = true
+
+[dev-dependencies]
+syn.workspace = true
+tempfile.workspace = true
