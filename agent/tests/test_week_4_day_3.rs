@@ -345,9 +345,12 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
     assert_eq!(result, "status: 3\noutput:\nfocused fail\n");
     assert_eq!(
         receipt.tool,
-        test_utils::tool_action("run_command", json!({
-            "argv": ["/bin/sh", "-c", "printf 'focused fail\\n'; exit 3"]
-        }))
+        test_utils::tool_action(
+            "run_command",
+            json!({
+                "argv": ["/bin/sh", "-c", "printf 'focused fail\\n'; exit 3"]
+            })
+        )
     );
     assert_eq!(receipt.exit_state, "error");
     assert_eq!(receipt.result, result);
@@ -392,7 +395,10 @@ fn test_task_8_jsonl_receipts_reopen_and_detect_tampering() {
     let path = temporary.path().join("receipts.jsonl");
     let receipt = EffectReceipt::new(
         "edit-1".to_owned(),
-        test_utils::tool_action("edit_file", json!({"path": "app.py", "old": "1", "new": "2"})),
+        test_utils::tool_action(
+            "edit_file",
+            json!({"path": "app.py", "old": "1", "new": "2"}),
+        ),
         "ok".to_owned(),
         "edited app.py".to_owned(),
         vec!["app.py".to_owned()],
@@ -487,13 +493,16 @@ fn test_task_9_agent_reads_edits_validates_and_finishes() {
     );
     assert_eq!(
         workspace.receipt_store.get("call-2").unwrap().tool,
-        test_utils::tool_action("run_command", json!({
-            "argv": [
-                "/bin/sh",
-                "-c",
-                "printf 'answer = 2\\n' | cmp -s - app.py"
-            ]
-        }))
+        test_utils::tool_action(
+            "run_command",
+            json!({
+                "argv": [
+                    "/bin/sh",
+                    "-c",
+                    "printf 'answer = 2\\n' | cmp -s - app.py"
+                ]
+            })
+        )
     );
     assert!(
         workspace

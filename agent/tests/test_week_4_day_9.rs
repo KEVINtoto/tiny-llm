@@ -286,7 +286,7 @@ fn test_task_2_oversized_result_becomes_bounded_verifiable_observation() {
 
     let unicode_content = format!("αβγ{}δεζ", "x".repeat(1_000));
     let mut unicode = bounded_workspace(&temp, "unicode", &unicode_content, 512, 5, 24);
-    let rendered = unicode.execute(&&test_utils::read_file_action("build.log"), None);
+    let rendered = unicode.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize unicode result");
     let observed = test_utils::payload(&rendered, "Tool result externalized:\n");
     assert!(

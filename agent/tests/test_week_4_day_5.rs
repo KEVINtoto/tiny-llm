@@ -25,7 +25,10 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
     .unwrap();
     let edit = EffectReceipt::new(
         "call-2".to_owned(),
-        test_utils::tool_action("edit_file", json!({"path": "app.py", "old": "1", "new": "2"})),
+        test_utils::tool_action(
+            "edit_file",
+            json!({"path": "app.py", "old": "1", "new": "2"}),
+        ),
         "ok".to_owned(),
         "edited app.py".to_owned(),
         vec!["app.py".to_owned()],
@@ -34,15 +37,9 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
     let messages = vec![
         test_utils::message("system", "Use one JSON action."),
         test_utils::message("user", "Fix and validate app.py."),
-        test_utils::message(
-            "assistant",
-            serde_json::to_string(&command.tool).unwrap(),
-        ),
+        test_utils::message("assistant", serde_json::to_string(&command.tool).unwrap()),
         test_utils::message("user", format!("Tool result:\n{}", command.result)),
-        test_utils::message(
-            "assistant",
-            serde_json::to_string(&edit.tool).unwrap(),
-        ),
+        test_utils::message("assistant", serde_json::to_string(&edit.tool).unwrap()),
         test_utils::message("user", format!("Tool result:\n{}", edit.result)),
     ];
     (messages, command, edit)

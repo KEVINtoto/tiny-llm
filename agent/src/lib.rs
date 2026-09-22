@@ -19,8 +19,8 @@ pub mod model_service;
 pub mod protocol;
 pub mod receipts;
 pub mod steering;
-pub mod workspace;
 mod utils;
+pub mod workspace;
 
 pub use crate::branching::{
     BranchOutcome, KvPrefixGenerator, PrefixReuse, run_branch, select_branch,

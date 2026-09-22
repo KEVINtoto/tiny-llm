@@ -300,7 +300,12 @@ fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
         })),
         receipts,
     );
-    workspace.execute(&ToolAction::ReadFile { path: "app.py".into()}, None);
+    workspace.execute(
+        &ToolAction::ReadFile {
+            path: "app.py".into(),
+        },
+        None,
+    );
 
     let result = workspace.execute(
         &test_utils::tool_action(
@@ -679,7 +684,8 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
             .receipt_store
             .get("call-1")
             .expect("base edit receipt")
-            .tool.tool(),
+            .tool
+            .tool(),
         "edit_file"
     );
     assert_eq!(
@@ -687,7 +693,8 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
             .receipt_store
             .get("call-2")
             .expect("validation receipt")
-            .tool.tool(),
+            .tool
+            .tool(),
         "run_command"
     );
     assert_eq!(
@@ -695,7 +702,8 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
             .receipt_store
             .get("call-1")
             .expect("base edit receipt")
-            .tool.tool(),
+            .tool
+            .tool(),
         "edit_file"
     );
     assert!(denied_workspace.receipt_store.get("call-2").is_none());

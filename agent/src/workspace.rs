@@ -8,7 +8,6 @@ use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::str::FromStr;
 
 use tempfile::NamedTempFile;
 
@@ -252,7 +251,7 @@ impl Workspace {
     fn relative_to_root(&self, resolved: &Path) -> Result<String, AgentError> {
         resolved
             .strip_prefix(&self.policy.root)
-            .and_then(|p| Ok(p.to_string_lossy().to_string()))
+            .map(|p| p.to_string_lossy().to_string())
             .map_err(|_| AgentError("resolved path is outside the workspace root".into()))
     }
 
@@ -365,14 +364,10 @@ impl Workspace {
         let observed = self.observed.get(&relative).map_or("", |v| v.as_str());
         let mut content = String::new();
 
-        if !exists
-            && !absolute
-                .parent()
-                .map_or(false, |p| p.exists() && p.is_dir())
-        {
+        if !exists && !absolute.parent().is_some_and(|p| p.exists() && p.is_dir()) {
             return Err(AgentError(format!(
                 "parent dir of write_file {:?} not exists",
-                &absolute
+                absolute
             )));
         }
         if exists {
@@ -385,7 +380,7 @@ impl Workspace {
             content = read_content_of_file(&absolute)?;
             let current = get_sha256_of_contents(&[content.as_bytes()]);
             if current != observed {
-                return Err(AgentError(format!("file changed since it was read")));
+                return Err(AgentError("file changed since it was read".into()));
             }
         }
 
@@ -400,9 +395,9 @@ impl Workspace {
                 return Err(AgentError("old content should occurs exactly once".into()));
             }
             vec![
-                content[..edit_pos].as_bytes(),
+                &content.as_bytes()[..edit_pos],
                 new.as_bytes(),
-                content[edit_pos + old.len()..].as_bytes(),
+                &content.as_bytes()[edit_pos + old.len()..],
             ]
         } else {
             vec![new.as_bytes()]
@@ -413,8 +408,8 @@ impl Workspace {
 
         self.confirm(action)?;
 
-        if &get_sha256_of_file(&absolute).unwrap_or("".into()) != observed {
-            return Err(AgentError(format!("file changed since it was read")));
+        if get_sha256_of_file(&absolute).unwrap_or("".into()) != observed {
+            return Err(AgentError("file changed since it was read".into()));
         }
 
         fs::rename(&temp_file, &absolute).map_err(to_agent_error)?;
@@ -447,24 +442,23 @@ impl Workspace {
             return Err(AgentError("expected run_command action".into()));
         };
 
-        check_command_line(&argv)?;
-        if {
-            let mut not_found = true;
-            for cmdline in &self.policy.allowed_commands {
-                if argv == cmdline {
-                    not_found = false;
-                    break;
-                }
+        check_command_line(argv)?;
+
+        let mut not_found = true;
+        for cmdline in &self.policy.allowed_commands {
+            if argv == cmdline {
+                not_found = false;
+                break;
             }
-            not_found
-        } {
+        }
+        if not_found {
             return Err(AgentError("command is not allowed".into()));
         }
 
         let mut cmd = Command::new(&argv[0]);
         cmd.current_dir(&self.policy.root);
-        for i in 1..argv.len() {
-            cmd.arg(&argv[i]);
+        for arg in argv.iter().skip(1) {
+            cmd.arg(arg);
         }
 
         self.confirm(action)?;
