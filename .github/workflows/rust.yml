@@ -90,3 +90,4 @@ jobs:
           --test test_model_service
           --test test_week_4_day_1
           --test test_week_4_day_2
+          --test test_week_4_day_3
