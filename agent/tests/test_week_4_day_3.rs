@@ -103,9 +103,12 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
     let source = temporary.path().join("app.py");
     fs::write(&source, "answer = 1\n").unwrap();
     let mut read_only = test_utils::read_only_workspace(temporary.path());
-    read_only.read_file("app.py").unwrap();
-    let error = read_only.edit_file("app.py", "1", "2").unwrap_err();
-    assert!(error.to_string().contains("writes are not enabled"));
+    assert_eq!(
+        read_only.execute(&test_utils::read_file_action("app.py"), None),
+        "answer = 1\n"
+    );
+    let error = read_only.execute(&test_utils::edit_file_action("app.py", "1", "2"), None);
+    assert_eq!(error, "error: tool is not enabled: edit_file");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 1\n");
 
     let approvals = Rc::new(RefCell::new(Vec::<ToolAction>::new()));
@@ -129,7 +132,10 @@ fn test_task_2_mutations_require_read_preflight_and_approval() {
             .contains("read the existing file")
     );
     assert!(approvals.borrow().is_empty());
-    assert_eq!(workspace.read_file("app.py").unwrap(), "answer = 1\n");
+    assert_eq!(
+        workspace.execute(&test_utils::read_file_action("app.py"), None),
+        "answer = 1\n"
+    );
     assert!(workspace.execute(&edit, None).contains("operator denied"));
     assert_eq!(approvals.borrow().len(), 1);
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 1\n");
@@ -150,7 +156,10 @@ fn test_task_3_rechecks_stale_bytes_after_approval() {
         })),
         test_utils::memory_store(),
     );
-    workspace.read_file("app.py").unwrap();
+    assert_eq!(
+        workspace.execute(&test_utils::read_file_action("app.py"), None),
+        "answer = 1\n"
+    );
     let result = workspace.execute(
         &test_utils::tool_action(
             "edit_file",
@@ -166,6 +175,8 @@ fn test_task_3_rechecks_stale_bytes_after_approval() {
 
 #[test]
 fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
+    use std::os::unix::fs::MetadataExt;
+
     let temporary = test_utils::TestDir::new("day3");
     let source = temporary.path().join("app.py");
     fs::write(&source, "answer = 1\n").unwrap();
@@ -174,12 +185,43 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
     fs::hard_link(&source, &old_inode).unwrap();
     let store_path = temporary.path().join("receipts.jsonl");
     let store = ReceiptStore::new(Some(store_path.clone())).unwrap();
+    let replacement = Rc::new(RefCell::new(None));
+    let observed_replacement = Rc::clone(&replacement);
+    let target = source.clone();
+    let original_link = old_inode.clone();
     let mut workspace = Workspace::new(
         test_utils::policy(temporary.path(), true, Vec::new()),
-        Some(Box::new(|_action| ConfirmResult::Approved(true))),
+        Some(Box::new(move |_action| {
+            // The current implementation prepares the temporary file before
+            // approval. Observe the actual replacement, not just a helper probe.
+            let parent = target.parent().unwrap();
+            let candidates = fs::read_dir(parent)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path != &target && path != &original_link && path != &store_path)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                candidates.len(),
+                1,
+                "expected one same-directory temporary file"
+            );
+            let temporary_path = &candidates[0];
+            assert_eq!(temporary_path.parent(), target.parent());
+            let metadata = fs::metadata(temporary_path).unwrap();
+            *observed_replacement.borrow_mut() =
+                Some((temporary_path.clone(), metadata.dev(), metadata.ino()));
+            ConfirmResult::Approved(true)
+        })),
         store,
     );
-    workspace.read_file("app.py").unwrap();
+    let probe = workspace.create_temporary_file(&source).unwrap();
+    assert_eq!(probe.path().parent(), source.parent());
+    assert!(probe.path().is_file());
+    drop(probe);
+    assert_eq!(
+        workspace.execute(&test_utils::read_file_action("app.py"), None),
+        "answer = 1\n"
+    );
     let result = workspace.execute(
         &test_utils::tool_action(
             "edit_file",
@@ -190,6 +232,14 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
 
     assert_eq!(result, "edited app.py");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 2\n");
+    let replacement = replacement.borrow();
+    let (temporary_path, device, inode) = replacement.as_ref().expect("replacement was observed");
+    let metadata = fs::metadata(&source).unwrap();
+    assert_eq!((metadata.dev(), metadata.ino()), (*device, *inode));
+    assert!(
+        !temporary_path.exists(),
+        "rename must consume the temporary path"
+    );
     assert_eq!(fs::read(&old_inode).unwrap(), b"answer = 1\n");
     fs::remove_file(&old_inode).unwrap();
     assert_eq!(workspace.modified_files(), vec!["app.py"]);
@@ -202,9 +252,7 @@ fn test_task_4_exact_edit_uses_same_directory_replace_and_receipt() {
         vec!["app.py"]
     );
 
-    // Python monkeypatches `os.replace` to observe both arguments directly.
-    // The directory listing checks cleanup. Exact rename source/destination
-    // instrumentation requires an injectable filesystem boundary; see README.md.
+    // Also require that the replacement leaves no temporary files behind.
     let mut names = fs::read_dir(temporary.path())
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -248,7 +296,10 @@ fn test_task_5_write_creates_new_files_but_observes_existing_files() {
             .execute(&overwrite, None)
             .contains("read the existing file")
     );
-    other.read_file("new.txt").unwrap();
+    assert_eq!(
+        other.execute(&test_utils::read_file_action("new.txt"), None),
+        "new\n"
+    );
     assert_eq!(other.execute(&overwrite, None), "wrote new.txt");
 }
 
@@ -293,8 +344,8 @@ fn test_task_6_validation_uses_exact_argv_and_records_output() {
     assert_eq!(approvals.borrow().len(), 1);
     assert_eq!(result, "status: 3\noutput:\nfocused fail\n");
     assert_eq!(
-        receipt.arguments,
-        test_utils::json_arguments(json!({
+        receipt.tool,
+        test_utils::tool_action("run_command", json!({
             "argv": ["/bin/sh", "-c", "printf 'focused fail\\n'; exit 3"]
         }))
     );
@@ -341,8 +392,7 @@ fn test_task_8_jsonl_receipts_reopen_and_detect_tampering() {
     let path = temporary.path().join("receipts.jsonl");
     let receipt = EffectReceipt::new(
         "edit-1".to_owned(),
-        "edit_file".to_owned(),
-        test_utils::json_arguments(json!({"path": "app.py", "old": "1", "new": "2"})),
+        test_utils::tool_action("edit_file", json!({"path": "app.py", "old": "1", "new": "2"})),
         "ok".to_owned(),
         "edited app.py".to_owned(),
         vec!["app.py".to_owned()],
@@ -436,8 +486,8 @@ fn test_task_9_agent_reads_edits_validates_and_finishes() {
         vec!["app.py"]
     );
     assert_eq!(
-        workspace.receipt_store.get("call-2").unwrap().arguments,
-        test_utils::json_arguments(json!({
+        workspace.receipt_store.get("call-2").unwrap().tool,
+        test_utils::tool_action("run_command", json!({
             "argv": [
                 "/bin/sh",
                 "-c",

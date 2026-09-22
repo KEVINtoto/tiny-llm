@@ -7,16 +7,22 @@ use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use std::str::FromStr;
 
-use sha2::Digest;
-use sha2::digest::Update;
+use tempfile::NamedTempFile;
 
+use crate::EffectReceipt;
 use crate::protocol::{AgentError, AgentWorkspace, ToolAction};
 use crate::protocol::{
     EDIT_FILE_TOOL_NAME, LIST_FILES_TOOL_NAME, READ_FILE_TOOL_NAME, RUN_COMMAND_TOOL_NAME,
     WRITE_FILE_TOOL_NAME,
 };
 use crate::receipts::ReceiptStore;
+use crate::utils::{
+    check_command_line, get_sha256_of_contents, get_sha256_of_file, read_content_of_file,
+    to_agent_error, write_to_file,
+};
 
 fn is_protected(name: &str) -> bool {
     matches!(
@@ -127,18 +133,31 @@ impl ToolPolicy {
             return Err(AgentError("workspace root must be a directoty".into()));
         }
 
+        for cmd in &self.allowed_commands {
+            check_command_line(cmd)?;
+        }
+
         if self.max_file_bytes <= 0 {
-            return Err(AgentError("max_file_bytes must be positive".into()));
+            return Err(AgentError(
+                "max_file_bytes must be finite and positive".into(),
+            ));
         }
         if self.max_list_entries <= 0 {
-            return Err(AgentError("max_list_entries must be positive".into()));
+            return Err(AgentError(
+                "max_list_entries must be finite and positive".into(),
+            ));
         }
         if self.max_write_bytes <= 0 {
-            return Err(AgentError("max_write_bytes must be positive".into()));
-        }
-        if self.command_timeout_seconds <= 0.0 {
             return Err(AgentError(
-                "command_timeout_seconds must be positive".into(),
+                "max_write_bytes must be finite and positive".into(),
+            ));
+        }
+        if self.command_timeout_seconds <= 0.0
+            || self.command_timeout_seconds.is_nan()
+            || self.command_timeout_seconds.is_infinite()
+        {
+            return Err(AgentError(
+                "command_timeout_seconds must be finite and positive".into(),
             ));
         }
         Ok(())
@@ -152,10 +171,10 @@ pub struct Workspace {
     pub confirm_tool: Option<ConfirmTool>,
     /// Python default: ``ReceiptStore()``.
     pub receipt_store: ReceiptStore,
-    observed: HashMap<PathBuf, String>,
+    /// observed sha256 of file; path must be resolved.
+    observed: HashMap<String, String>,
     modified: BTreeSet<String>,
-    next_call_number: i64,
-
+    next_tool_call_id: i64,
     available_tools: HashSet<String>,
 }
 
@@ -172,7 +191,7 @@ impl Workspace {
             receipt_store,
             observed: HashMap::new(),
             modified: BTreeSet::new(),
-            next_call_number: 1,
+            next_tool_call_id: 1,
             available_tools,
         }
     }
@@ -188,7 +207,11 @@ impl Workspace {
     }
 
     /// Resolve one relative path without traversal or symlinks.
-    pub fn resolve_path(&self, raw: &str, must_exist: bool) -> Result<PathBuf, AgentError> {
+    pub fn resolve_path(
+        &self,
+        raw: &str,
+        must_exist: bool,
+    ) -> Result<(PathBuf, String), AgentError> {
         if raw.trim().is_empty() || raw.contains('\0') {
             return Err(AgentError(
                 "path must be non-empty and contain no NUL bytes".into(),
@@ -222,15 +245,23 @@ impl Workspace {
                 Err(error) => return Err(inaccessible(error)),
             }
         }
-        let relative = resolved
+        let relative = self.relative_to_root(&resolved)?;
+        Ok((resolved, relative))
+    }
+
+    fn relative_to_root(&self, resolved: &Path) -> Result<String, AgentError> {
+        resolved
             .strip_prefix(&self.policy.root)
-            .map_err(|_| AgentError("resolved path is outside the workspace root".into()))?;
-        Ok(resolved)
+            .and_then(|p| Ok(p.to_string_lossy().to_string()))
+            .map_err(|_| AgentError("resolved path is outside the workspace root".into()))
     }
 
     /// List one directory, bounded by the policy.
-    pub fn list_files(&mut self, raw: &str) -> Result<String, AgentError> {
-        let resolved = self.resolve_path(raw, true)?;
+    fn list_files(&mut self, action: &ToolAction) -> Result<String, AgentError> {
+        let ToolAction::ListFiles { path: raw } = action else {
+            return Err(AgentError("expected list_files action".into()));
+        };
+        let (resolved, _) = self.resolve_path(raw, true)?;
         if !resolved.is_dir() {
             return Err(AgentError("path is not a directory".into()));
         }
@@ -252,10 +283,8 @@ impl Workspace {
                 continue;
             }
             let prefix = if path.is_dir() { "dir " } else { "file " };
-            let relative = path
-                .strip_prefix(&self.policy.root)
-                .map_err(|e| AgentError(e.to_string()))?;
-            entries.push((relative.to_string_lossy().to_string(), prefix));
+            let relative = self.relative_to_root(&path)?;
+            entries.push((relative, prefix));
         }
 
         entries.sort();
@@ -277,8 +306,11 @@ impl Workspace {
     }
 
     /// Read one bounded UTF-8 regular file.
-    pub fn read_file(&mut self, raw: &str) -> Result<String, AgentError> {
-        let resolved = self.resolve_path(raw, true)?;
+    fn read_file(&mut self, action: &ToolAction) -> Result<String, AgentError> {
+        let ToolAction::ReadFile { path: raw } = action else {
+            return Err(AgentError("expected read_file action".into()));
+        };
+        let (resolved, relative) = self.resolve_path(raw, true)?;
         let metadata = resolved.metadata().map_err(|e| AgentError(e.to_string()))?;
         if metadata.is_dir() {
             return Err(AgentError("read_file path must be a regular file".into()));
@@ -289,54 +321,254 @@ impl Workspace {
                 self.policy.max_file_bytes
             )));
         }
-        let content = fs::read_to_string(&resolved)
-            .map_err(|e| AgentError(format!("invalid UTF-8: {}", e)))?;
-        let hash: String = sha2::Sha256::new()
-            .chain(&content)
-            .finalize()
-            .iter()
-            .map(|b| *b as char)
-            .collect();
+        let content = read_content_of_file(&resolved)?;
+        let hash = get_sha256_of_contents(&[content.as_bytes()]);
 
-        self.observed.insert(resolved, hash);
+        self.observed.insert(relative, hash);
         Ok(content)
     }
 
-    /// Atomically create a file or replace one previously read unchanged.
-    pub fn write_file(&mut self, raw: &str, content: &str) -> Result<String, AgentError> {
-        todo!()
-    }
+    /// write_file: Atomically create a file or replace one previously read unchanged.
+    ///
+    /// edit_file: Replace one exact occurrence in a previously read unchanged file.
+    fn write_or_edit_file(
+        &mut self,
+        action: &ToolAction,
+        tool_call_id: String,
+    ) -> Result<String, AgentError> {
+        let (raw, old, new, verb) = match action {
+            ToolAction::WriteFile { path, content } => {
+                (path.as_str(), None, content.as_str(), "wrote")
+            }
+            ToolAction::EditFile { path, old, new } => {
+                (path.as_str(), Some(old.as_str()), new.as_str(), "edited")
+            }
+            _ => return Err(AgentError("expected write_file or edit_file action".into())),
+        };
 
-    /// Replace one exact occurrence in a previously read unchanged file.
-    pub fn edit_file(&mut self, raw: &str, old: &str, new: &str) -> Result<String, AgentError> {
-        todo!()
+        if let Some(old) = old
+            && old.is_empty()
+        {
+            return Err(AgentError(
+                "the old content to be edited cannot be empty".into(),
+            ));
+        }
+        if new.len() >= self.policy.max_write_bytes as usize {
+            return Err(AgentError(format!(
+                "exceeds {} bytes",
+                self.policy.max_write_bytes
+            )));
+        }
+
+        let (absolute, relative) = self.resolve_path(raw, old.is_some())?;
+        let exists = absolute.try_exists().map_err(to_agent_error)?;
+        let observed = self.observed.get(&relative).map_or("", |v| v.as_str());
+        let mut content = String::new();
+
+        if !exists
+            && !absolute
+                .parent()
+                .map_or(false, |p| p.exists() && p.is_dir())
+        {
+            return Err(AgentError(format!(
+                "parent dir of write_file {:?} not exists",
+                &absolute
+            )));
+        }
+        if exists {
+            if observed.is_empty() {
+                return Err(AgentError(
+                    "read the existing file before changing it".into(),
+                ));
+            }
+
+            content = read_content_of_file(&absolute)?;
+            let current = get_sha256_of_contents(&[content.as_bytes()]);
+            if current != observed {
+                return Err(AgentError(format!("file changed since it was read")));
+            }
+        }
+
+        let contents_to_write = if let Some(old) = old {
+            // old string occurs exactly once
+            let Some(edit_pos) = content.find(old) else {
+                return Err(AgentError("old content not found in the file".into()));
+            };
+            if let Some(last) = content.rfind(old)
+                && last != edit_pos
+            {
+                return Err(AgentError("old content should occurs exactly once".into()));
+            }
+            vec![
+                content[..edit_pos].as_bytes(),
+                new.as_bytes(),
+                content[edit_pos + old.len()..].as_bytes(),
+            ]
+        } else {
+            vec![new.as_bytes()]
+        };
+
+        let temp_file = self.create_temporary_file(&absolute)?;
+        write_to_file(temp_file.path(), &contents_to_write)?;
+
+        self.confirm(action)?;
+
+        if &get_sha256_of_file(&absolute).unwrap_or("".into()) != observed {
+            return Err(AgentError(format!("file changed since it was read")));
+        }
+
+        fs::rename(&temp_file, &absolute).map_err(to_agent_error)?;
+
+        let result = format!("{} {}", verb, relative);
+        self.modified.insert(relative.clone());
+        self.observed
+            .insert(relative.clone(), get_sha256_of_contents(&contents_to_write));
+
+        self.receipt_store.put(EffectReceipt::new(
+            tool_call_id,
+            action.clone(),
+            "ok".into(),
+            result.clone(),
+            vec![relative],
+        )?)?;
+
+        Ok(result)
     }
 
     /// Run one exact allowed argument vector without a shell.
-    pub fn run_command(&mut self, argv: &[String]) -> Result<String, AgentError> {
-        todo!()
+    fn run_command(
+        &mut self,
+        action: &ToolAction,
+        tool_call_id: String,
+    ) -> Result<String, AgentError> {
+        const MAX_COMMAND_OUTPUT_CHARS: usize = 10000;
+
+        let ToolAction::RunCommand { argv } = action else {
+            return Err(AgentError("expected run_command action".into()));
+        };
+
+        check_command_line(&argv)?;
+        if {
+            let mut not_found = true;
+            for cmdline in &self.policy.allowed_commands {
+                if argv == cmdline {
+                    not_found = false;
+                    break;
+                }
+            }
+            not_found
+        } {
+            return Err(AgentError("command is not allowed".into()));
+        }
+
+        let mut cmd = Command::new(&argv[0]);
+        cmd.current_dir(&self.policy.root);
+        for i in 1..argv.len() {
+            cmd.arg(&argv[i]);
+        }
+
+        self.confirm(action)?;
+
+        let output = cmd.output().map_err(to_agent_error)?;
+        let success = output.status.success();
+        let exit_state = if success { "ok" } else { "error" }.into();
+
+        let mut captured = output.stdout;
+        captured.extend(output.stderr);
+        captured.truncate(MAX_COMMAND_OUTPUT_CHARS);
+
+        let result = format!(
+            "status: {}\noutput:\n{}",
+            output.status.code().unwrap_or(-1),
+            String::from_utf8(captured).map_err(to_agent_error)?
+        );
+
+        self.receipt_store.put(EffectReceipt::new(
+            tool_call_id,
+            action.clone(),
+            exit_state,
+            result.clone(),
+            vec![],
+        )?)?;
+
+        Ok(result)
     }
 
     /// Dispatch one action, approving and receipting effects once.
     pub fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
+        let error_to_string = |e| format!("error: {}", e);
+
+        let tool_call_id = if is_effective_action(action) {
+            let tool_call_id = tool_call_id.map_or(self.next_tool_call_id(), |id| id.to_string());
+            if let Some(previous) = self.receipt_store.get(&tool_call_id) {
+                if &previous.tool != action {
+                    return error_to_string(AgentError(
+                        "tool call id was already used for another action".into(),
+                    ));
+                }
+                return previous.result.clone();
+            }
+            tool_call_id
+        } else {
+            String::new()
+        };
+
         if !self.available_tools.contains(action.tool()) {
             return format!("error: tool is not enabled: {}", action.tool());
         }
 
         let result = match action {
-            ToolAction::ListFiles { path } => self.list_files(path),
-            ToolAction::ReadFile { path } => self.read_file(path),
-            ToolAction::WriteFile { .. } => {
-                todo!()
+            ToolAction::ListFiles { .. } => self.list_files(action),
+            ToolAction::ReadFile { .. } => self.read_file(action),
+            ToolAction::WriteFile { .. } | ToolAction::EditFile { .. } => {
+                self.write_or_edit_file(action, tool_call_id)
             }
-            ToolAction::EditFile { .. } => {
-                todo!()
-            }
-            ToolAction::RunCommand { .. } => {
-                todo!()
-            }
+            ToolAction::RunCommand { .. } => self.run_command(action, tool_call_id),
         };
-        result.unwrap_or_else(|e| format!("error: {}", e))
+        result.unwrap_or_else(error_to_string)
+    }
+
+    fn next_tool_call_id(&mut self) -> String {
+        let mut tool_call_id: String;
+        loop {
+            tool_call_id = format!("call-{}", self.next_tool_call_id);
+            self.next_tool_call_id += 1;
+
+            if self.receipt_store.get(&tool_call_id).is_none() {
+                break;
+            }
+        }
+        tool_call_id
+    }
+
+    fn confirm(&self, action: &ToolAction) -> Result<(), AgentError> {
+        if let Some(confirm_tool) = self.confirm_tool.as_ref() {
+            match confirm_tool(action) {
+                ConfirmResult::Approved(false) => {
+                    return Err(AgentError(format!(
+                        "operator denied {} tool action",
+                        action.tool()
+                    )));
+                }
+                ConfirmResult::Decision(ApprovalDecision {
+                    approved: false,
+                    reason,
+                }) => {
+                    return Err(AgentError(format!(
+                        "operator denied {} tool action: {}",
+                        action.tool(),
+                        reason
+                    )));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn create_temporary_file(&self, near: &Path) -> Result<NamedTempFile, AgentError> {
+        let parent = near.parent().unwrap_or(&self.policy.root);
+        NamedTempFile::new_in(parent).map_err(to_agent_error)
     }
 }
 
@@ -346,7 +578,7 @@ impl AgentWorkspace for Workspace {
     }
 
     fn available_tools(&self) -> &HashSet<String> {
-        Workspace::available_tools(self)
+        &self.available_tools
     }
 
     fn modified_files(&self) -> Vec<String> {
@@ -370,4 +602,11 @@ fn get_available_tools(policy: &ToolPolicy) -> HashSet<String> {
     }
 
     tools
+}
+
+fn is_effective_action(action: &ToolAction) -> bool {
+    matches!(
+        action,
+        ToolAction::WriteFile { .. } | ToolAction::EditFile { .. } | ToolAction::RunCommand { .. }
+    )
 }

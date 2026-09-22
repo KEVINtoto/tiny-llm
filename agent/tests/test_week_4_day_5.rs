@@ -17,8 +17,7 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
     let command_result = format!("status: 0\noutput:\n{}", "validation detail\n".repeat(200));
     let command = EffectReceipt::new(
         "call-1".to_owned(),
-        "run_command".to_owned(),
-        test_utils::json_arguments(json!({"argv": ["python", "validate.py"]})),
+        test_utils::tool_action("run_command", json!({"argv": ["python", "validate.py"]})),
         "ok".to_owned(),
         command_result,
         vec![],
@@ -26,8 +25,7 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
     .unwrap();
     let edit = EffectReceipt::new(
         "call-2".to_owned(),
-        "edit_file".to_owned(),
-        test_utils::json_arguments(json!({"path": "app.py", "old": "1", "new": "2"})),
+        test_utils::tool_action("edit_file", json!({"path": "app.py", "old": "1", "new": "2"})),
         "ok".to_owned(),
         "edited app.py".to_owned(),
         vec!["app.py".to_owned()],
@@ -38,18 +36,12 @@ fn completed_effects() -> (Vec<Message>, EffectReceipt, EffectReceipt) {
         test_utils::message("user", "Fix and validate app.py."),
         test_utils::message(
             "assistant",
-            json!({"tool": command.tool, "argv": ["python", "validate.py"]}).to_string(),
+            serde_json::to_string(&command.tool).unwrap(),
         ),
         test_utils::message("user", format!("Tool result:\n{}", command.result)),
         test_utils::message(
             "assistant",
-            json!({
-                "tool": edit.tool,
-                "path": "app.py",
-                "old": "1",
-                "new": "2"
-            })
-            .to_string(),
+            serde_json::to_string(&edit.tool).unwrap(),
         ),
         test_utils::message("user", format!("Tool result:\n{}", edit.result)),
     ];
@@ -121,8 +113,18 @@ fn test_task_3_requires_exact_receipt_evidence_and_preserves_the_input() {
     let mismatches = [
         EffectReceipt::new(
             command.tool_call_id.clone(),
-            "edit_file".to_owned(),
-            command.arguments.clone(),
+            test_utils::tool_action(
+                "edit_file",
+                json!({"path": "app.py", "old": "1", "new": "2"}),
+            ),
+            command.exit_state.clone(),
+            command.result.clone(),
+            vec![],
+        )
+        .unwrap(),
+        EffectReceipt::new(
+            command.tool_call_id.clone(),
+            test_utils::tool_action("run_command", json!({"argv": ["python", "other.py"]})),
             command.exit_state.clone(),
             command.result.clone(),
             vec![],
@@ -131,16 +133,6 @@ fn test_task_3_requires_exact_receipt_evidence_and_preserves_the_input() {
         EffectReceipt::new(
             command.tool_call_id.clone(),
             command.tool.clone(),
-            test_utils::json_arguments(json!({"argv": ["python", "other.py"]})),
-            command.exit_state.clone(),
-            command.result.clone(),
-            vec![],
-        )
-        .unwrap(),
-        EffectReceipt::new(
-            command.tool_call_id.clone(),
-            command.tool.clone(),
-            command.arguments.clone(),
             command.exit_state.clone(),
             "different result".to_owned(),
             vec![],

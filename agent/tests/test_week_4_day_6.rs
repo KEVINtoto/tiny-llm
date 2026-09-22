@@ -336,11 +336,11 @@ fn test_task_5_steered_resume_does_not_replay_the_completed_edit() {
     assert_eq!(fs::read_to_string(&counter).unwrap(), "1");
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 2\n");
     assert_eq!(
-        workspace.receipt_store.get("call-1").unwrap().tool,
+        workspace.receipt_store.get("call-1").unwrap().tool.tool(),
         "edit_file"
     );
     assert_eq!(
-        workspace.receipt_store.get("call-2").unwrap().tool,
+        workspace.receipt_store.get("call-2").unwrap().tool.tool(),
         "run_command"
     );
     let visible = &fresh.calls[0];

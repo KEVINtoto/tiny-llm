@@ -326,11 +326,11 @@ fn test_task_7_edit_checkpoint_resume_validates_without_replaying_effect() {
     );
     assert_eq!(fs::read_to_string(&source).unwrap(), "answer = 2\n");
     assert_eq!(
-        workspace.receipt_store.get("call-1").unwrap().tool,
+        workspace.receipt_store.get("call-1").unwrap().tool.tool(),
         "edit_file"
     );
     assert_eq!(
-        workspace.receipt_store.get("call-2").unwrap().tool,
+        workspace.receipt_store.get("call-2").unwrap().tool.tool(),
         "run_command"
     );
 }

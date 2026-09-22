@@ -246,7 +246,7 @@ fn test_task_2_oversized_result_becomes_bounded_verifiable_observation() {
     let content = format!("HEAD----{}----TAIL", "x".repeat(3_000));
     let mut bounded = bounded_workspace(&temp, "ascii", &content, 512, 8, 24);
 
-    let observation = bounded.execute(&test_utils::read_action("build.log"), None);
+    let observation = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize oversized result");
     let observed = test_utils::payload(&observation, "Tool result externalized:\n");
 
@@ -286,7 +286,7 @@ fn test_task_2_oversized_result_becomes_bounded_verifiable_observation() {
 
     let unicode_content = format!("αβγ{}δεζ", "x".repeat(1_000));
     let mut unicode = bounded_workspace(&temp, "unicode", &unicode_content, 512, 5, 24);
-    let rendered = unicode.execute(&test_utils::read_action("build.log"), None);
+    let rendered = unicode.execute(&&test_utils::read_file_action("build.log"), None);
     // .expect("externalize unicode result");
     let observed = test_utils::payload(&rendered, "Tool result externalized:\n");
     assert!(
@@ -309,14 +309,14 @@ fn test_task_2_externalization_uses_utf8_bytes_at_the_exact_inline_boundary() {
     let temp = test_utils::TestDir::new("day9-inline-boundary");
     let mut inline = default_bounded(&temp, "inline", &"a".repeat(512));
     assert_eq!(
-        inline.execute(&test_utils::read_action("build.log"), None),
+        inline.execute(&test_utils::read_file_action("build.log"), None),
         // .expect("read inline result"),
         "a".repeat(512)
     );
 
     let content = "é".repeat(512);
     let mut multibyte = default_bounded(&temp, "multibyte", &content);
-    let result = multibyte.execute(&test_utils::read_action("build.log"), None);
+    let result = multibyte.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize multibyte result");
     let observed = test_utils::payload(&result, "Tool result externalized:\n");
     assert_eq!(observed["byte_count"], 1_024);
@@ -327,7 +327,7 @@ fn test_task_2_externalization_uses_utf8_bytes_at_the_exact_inline_boundary() {
 fn test_task_2_inline_cap_plus_one_byte_is_externalized() {
     let temp = test_utils::TestDir::new("day9-cap-plus-one");
     let mut bounded = default_bounded(&temp, "cap", &"a".repeat(513));
-    let result = bounded.execute(&test_utils::read_action("build.log"), None);
+    let result = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize cap plus one");
     assert!(result.starts_with("Tool result externalized:\n"));
 }
@@ -336,7 +336,7 @@ fn test_task_2_inline_cap_plus_one_byte_is_externalized() {
 fn test_task_2_four_byte_unicode_bounds_the_whole_encoded_observation() {
     let temp = test_utils::TestDir::new("day9-four-byte-bound");
     let mut bounded = bounded_workspace(&temp, "emoji", &"🙂".repeat(300), 512, 80, 512);
-    let result = bounded.execute(&test_utils::read_action("build.log"), None);
+    let result = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize emoji result");
     assert!(
         result.len() <= 512,
@@ -349,7 +349,7 @@ fn test_task_2_four_byte_unicode_preview_ranges_are_byte_accurate() {
     let temp = test_utils::TestDir::new("day9-four-byte-ranges");
     let content = "🙂".repeat(300);
     let mut bounded = bounded_workspace(&temp, "emoji", &content, 512, 80, 512);
-    let result = bounded.execute(&test_utils::read_action("build.log"), None);
+    let result = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize emoji result");
     let observed = test_utils::payload(&result, "Tool result externalized:\n");
 
@@ -368,7 +368,7 @@ fn test_task_3_explicit_virtual_read_returns_only_the_bound_range() {
     let temp = test_utils::TestDir::new("day9-explicit-range");
     let content = "0123456789".repeat(100);
     let mut bounded = bounded_workspace(&temp, "range", &content, 512, 5, 32);
-    let first = bounded.execute(&test_utils::read_action("build.log"), None);
+    let first = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize result");
     let identity = test_utils::payload(&first, "Tool result externalized:\n");
     let path = bounded
@@ -376,7 +376,7 @@ fn test_task_3_explicit_virtual_read_returns_only_the_bound_range() {
         .range_path(identity["artifact_id"].as_str().unwrap(), 117, 139)
         .expect("range path");
 
-    let result = bounded.execute(&test_utils::read_action(&path), None);
+    let result = bounded.execute(&test_utils::read_file_action(&path), None);
     // .expect("read range");
     let observed = test_utils::payload(&result, "Artifact range:\n");
 
@@ -401,14 +401,14 @@ fn test_task_3_selected_unicode_byte_count_is_not_a_character_count() {
     let temp = test_utils::TestDir::new("day9-unicode-count");
     let content = "€".repeat(300);
     let mut bounded = default_bounded(&temp, "unicode", &content);
-    let first = bounded.execute(&test_utils::read_action("build.log"), None);
+    let first = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize result");
     let identity = test_utils::payload(&first, "Tool result externalized:\n");
     let path = bounded
         .artifacts
         .range_path(identity["artifact_id"].as_str().unwrap(), 0, 510)
         .expect("range path");
-    let result = bounded.execute(&test_utils::read_action(&path), None);
+    let result = bounded.execute(&test_utils::read_file_action(&path), None);
     // .expect("read unicode range");
     let observed = test_utils::payload(&result, "Artifact range:\n");
     assert_eq!(observed["byte_count"], 510);
@@ -420,12 +420,12 @@ fn test_task_3_advertised_unicode_range_is_aligned_and_runnable() {
     let temp = test_utils::TestDir::new("day9-advertised-unicode");
     let content = "€".repeat(300);
     let mut bounded = default_bounded(&temp, "unicode", &content);
-    let first = bounded.execute(&test_utils::read_action("build.log"), None);
+    let first = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize result");
     let identity = test_utils::payload(&first, "Tool result externalized:\n");
     let advertised = identity["range_request"]["path"].as_str().unwrap();
     assert!(advertised.ends_with("/bytes/0-510"));
-    let result = bounded.execute(&test_utils::read_action(advertised), None);
+    let result = bounded.execute(&test_utils::read_file_action(advertised), None);
     // .expect("execute advertised range");
     let observed = test_utils::payload(&result, "Artifact range:\n");
     assert_eq!(observed["start"], 0);
@@ -467,12 +467,12 @@ fn test_task_3_range_cap_must_hold_one_max_width_utf8_character() {
 fn test_task_3_four_byte_range_cap_is_advertised_and_runnable() {
     let temp = test_utils::TestDir::new("day9-four-byte-cap");
     let mut bounded = bounded_workspace(&temp, "emoji", &"🙂".repeat(130), 512, 64, 4);
-    let first = bounded.execute(&test_utils::read_action("build.log"), None);
+    let first = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("externalize result");
     let identity = test_utils::payload(&first, "Tool result externalized:\n");
     let advertised = identity["range_request"]["path"].as_str().unwrap();
     assert!(advertised.ends_with("/bytes/0-4"));
-    let result = bounded.execute(&test_utils::read_action(advertised), None);
+    let result = bounded.execute(&test_utils::read_file_action(advertised), None);
     // .expect("read one emoji");
     let observed = test_utils::payload(&result, "Artifact range:\n");
     assert_eq!(observed["start"], 0);
@@ -493,7 +493,7 @@ fn test_task_3_four_byte_cap_still_rejects_a_supplied_misaligned_range() {
         .artifacts
         .range_path(&record.artifact_id, 0, 3)
         .expect("range path");
-    let result = bounded.execute(&test_utils::read_action(&misaligned), None);
+    let result = bounded.execute(&test_utils::read_file_action(&misaligned), None);
     // .expect("misalignment is model-visible");
     assert_eq!(result, "error: artifact range does not align to UTF-8 text");
 }
@@ -520,7 +520,7 @@ fn test_task_4_range_failures_are_ordinary_and_do_not_fall_through() {
             .expect("create fall-through path");
         fs::write(&learner_path, b"learner-secret").expect("write fall-through secret");
 
-        let result = bounded.execute(&test_utils::read_action(&path), None);
+        let result = bounded.execute(&test_utils::read_file_action(&path), None);
         // .expect("range failure is model-visible");
         assert!(result.starts_with("error: "));
         assert!(result.contains(message), "{path}: {result}");
@@ -538,7 +538,7 @@ fn test_task_4_oversized_decimal_bounds_are_ordinary_and_do_not_fall_through() {
         let digits = "9".repeat(5_000);
         let bound = template.replace("{digits}", &digits);
         let path = format!(".tool-artifacts/{}/bytes/{bound}", record.artifact_id);
-        let result = bounded.execute(&test_utils::read_action(&path), None);
+        let result = bounded.execute(&test_utils::read_file_action(&path), None);
         // .expect("oversized bound is model-visible");
         assert_eq!(result, "error: artifact range path is malformed");
     }
@@ -576,7 +576,7 @@ fn test_task_4_unknown_store_and_tampering_do_not_leak_artifacts() {
         16,
     )
     .unwrap();
-    let missing = unrelated.execute(&test_utils::read_action(&path), None);
+    let missing = unrelated.execute(&test_utils::read_file_action(&path), None);
     // .expect("unknown artifact is model-visible");
     assert_eq!(missing, "error: artifact is not available in this store");
     assert!(!missing.contains(&record.artifact_id));
@@ -587,7 +587,7 @@ fn test_task_4_unknown_store_and_tampering_do_not_leak_artifacts() {
         .artifacts
         .range_path(&unicode_record.artifact_id, 1, 3)
         .expect("range path");
-    let split = bounded.execute(&test_utils::read_action(&split_path), None);
+    let split = bounded.execute(&test_utils::read_file_action(&split_path), None);
     // .expect("misalignment is model-visible");
     assert_eq!(split, "error: artifact range does not align to UTF-8 text");
 
@@ -596,7 +596,7 @@ fn test_task_4_unknown_store_and_tampering_do_not_leak_artifacts() {
         b"tampered",
     )
     .expect("tamper artifact");
-    let tampered = bounded.execute(&test_utils::read_action(&path), None);
+    let tampered = bounded.execute(&test_utils::read_file_action(&path), None);
     // .expect("tampering is model-visible");
     assert_eq!(
         tampered,
@@ -617,7 +617,7 @@ fn test_task_4_range_cap_plus_one_is_rejected() {
         .artifacts
         .range_path(&record.artifact_id, 0, 17)
         .expect("range path");
-    let result = bounded.execute(&test_utils::read_action(&path), None);
+    let result = bounded.execute(&test_utils::read_file_action(&path), None);
     // .expect("cap failure is model-visible");
     assert_eq!(result, "error: artifact range exceeds 16 bytes");
 }
@@ -700,7 +700,7 @@ fn test_task_5_existing_agent_loop_retrieves_evidence_then_continues() {
 fn test_task_6_small_and_error_results_remain_inline_and_state_is_delegated() {
     let temp = test_utils::TestDir::new("day9-inline-delegation");
     let mut bounded = bounded_workspace(&temp, "small", "small result\n", 512, 8, 16);
-    let result = bounded.execute(&test_utils::read_action("build.log"), None);
+    let result = bounded.execute(&test_utils::read_file_action("build.log"), None);
     // .expect("read small result");
     assert_eq!(result, "small result\n");
     assert!(std::ptr::eq(bounded.policy(), &bounded.workspace.policy));

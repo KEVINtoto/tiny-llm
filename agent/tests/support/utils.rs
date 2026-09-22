@@ -195,10 +195,6 @@ pub fn failed_names(report: &tiny_llm_agent::EvaluationReport) -> Vec<&str> {
         .collect()
 }
 
-pub fn read_action(path: &str) -> ToolAction {
-    tool_action("read_file", json!({"path": path}))
-}
-
 pub fn payload(observation: &str, prefix: &str) -> Value {
     let encoded = observation
         .strip_prefix(prefix)
@@ -247,4 +243,20 @@ impl TestDir {
     pub fn path(&self) -> &Path {
         self.0.path()
     }
+}
+
+pub fn list_files_action(path: &str) -> ToolAction {
+    return ToolAction::ListFiles { path: path.into() }
+}
+pub fn read_file_action(path: &str) -> ToolAction {
+    return ToolAction::ReadFile { path: path.into() }
+}
+pub fn write_file_action(path: &str, content: &str) -> ToolAction {
+    return ToolAction::WriteFile { path: path.into(), content: content.into() }
+}
+pub fn edit_file_action(path: &str, old: &str, new: &str) -> ToolAction {
+    return ToolAction::EditFile { path: path.into(), old: old.into(), new: new.into() }
+}
+pub fn run_command_action(argv: Vec<String>) -> ToolAction {
+    return ToolAction::RunCommand { argv }
 }

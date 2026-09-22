@@ -5,17 +5,20 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::protocol::AgentError;
+use serde::{Deserialize, Serialize};
 
-use serde_json::{Map, Value};
+use crate::ToolAction;
+use crate::protocol::AgentError;
+use crate::utils::{append_to_file, get_sha256_of_contents, read_content_of_file, to_agent_error};
 
 /// One completed tool call and its observable outcome.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EffectReceipt {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    receipt_id: String,
     pub tool_call_id: String,
-    pub tool: String,
     /// Python's ``dict[str, Any]``.
-    pub arguments: Map<String, Value>,
+    pub tool: ToolAction,
     pub exit_state: String,
     pub result: String,
     /// Python default: ``()``.
@@ -25,16 +28,15 @@ pub struct EffectReceipt {
 impl EffectReceipt {
     pub fn new(
         tool_call_id: String,
-        tool: String,
-        arguments: Map<String, Value>,
+        tool: ToolAction,
         exit_state: String,
         result: String,
         changed_artifacts: Vec<String>,
     ) -> Result<Self, AgentError> {
-        let receipt = Self {
+        let mut receipt = Self {
+            receipt_id: String::new(),
             tool_call_id,
             tool,
-            arguments,
             exit_state,
             result,
             changed_artifacts,
@@ -44,29 +46,67 @@ impl EffectReceipt {
     }
 
     /// Python's ``__post_init__``.
-    pub fn post_init(&self) -> Result<(), AgentError> {
-        // TODO: validate and freeze the receipt payload.
-        todo!()
+    pub fn post_init(&mut self) -> Result<(), AgentError> {
+        // validate and freeze the receipt payload.
+        if self.tool_call_id.is_empty() {
+            return Err(AgentError(
+                "receipt call id and tool must not be empty".into(),
+            ));
+        }
+        if &self.exit_state != "ok" && &self.exit_state != "error" {
+            return Err(AgentError(
+                "receipt exit_state must be 'ok' or 'error'".into(),
+            ));
+        }
+
+        // self.receipt_id must be empty before call this line,
+        // see `#[serde(skip_serializing_if = "String::is_empty")]`
+        self.receipt_id = self.compute_receipt_digest()?;
+
+        Ok(())
     }
 
     /// Return the digest of the canonical receipt payload.
     pub fn receipt_id(&self) -> String {
-        todo!()
+        self.receipt_id.clone()
+    }
+
+    fn compute_receipt_digest(&self) -> Result<String, AgentError> {
+        Ok(get_sha256_of_contents(&[serde_json::to_string(self)
+            .map_err(to_agent_error)?
+            .as_bytes()]))
     }
 
     /// Convert the receipt to its JSON-compatible representation.
-    pub fn to_dict(&self) -> Map<String, Value> {
-        todo!()
+    pub fn to_string(&self) -> Result<String, AgentError> {
+        serde_json::to_string(self).map_err(to_agent_error)
     }
 
     /// Parse and verify one persisted receipt.
-    pub fn from_dict(payload: &Map<String, Value>) -> Result<EffectReceipt, AgentError> {
-        todo!()
+    pub fn from_string(payload: impl AsRef<str>) -> Result<EffectReceipt, AgentError> {
+        let receipt: Self = serde_json::from_str(payload.as_ref()).map_err(to_agent_error)?;
+        let receipt_id = receipt.receipt_id().to_string();
+
+        let new_receipt = EffectReceipt::new(
+            receipt.tool_call_id,
+            receipt.tool,
+            receipt.exit_state,
+            receipt.result,
+            receipt.changed_artifacts,
+        )?;
+
+        if receipt_id != new_receipt.receipt_id() {
+            return Err(AgentError(
+                "receipt digest does not match its contents".into(),
+            ));
+        }
+
+        Ok(new_receipt)
     }
 }
 
 /// Keep receipts in memory and optionally append them to one JSONL file.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ReceiptStore {
     /// Python default: ``None``.
     pub path: Option<PathBuf>,
@@ -75,7 +115,7 @@ pub struct ReceiptStore {
 
 impl ReceiptStore {
     pub fn new(path: Option<PathBuf>) -> Result<Self, AgentError> {
-        let store = Self {
+        let mut store = Self {
             path,
             by_call: HashMap::new(),
         };
@@ -84,18 +124,55 @@ impl ReceiptStore {
     }
 
     /// Python's ``__post_init__``.
-    pub fn post_init(&self) -> Result<(), AgentError> {
-        // TODO: load and verify an existing JSONL log.
+    pub fn post_init(&mut self) -> Result<(), AgentError> {
+        // load and verify an existing JSONL log.
+        let Some(path) = self.path.as_ref() else {
+            return Ok(());
+        };
+        if !path.try_exists().map_err(to_agent_error)? {
+            return Ok(());
+        }
+
+        for line in read_content_of_file(path)?.lines() {
+            let receipt = EffectReceipt::from_string(line)?;
+            let tool_call_id = receipt.tool_call_id.clone();
+            if let Some(previous) = self.get(&tool_call_id)
+                && previous.receipt_id() != receipt.receipt_id()
+            {
+                return Err(AgentError("tool call id has conflicting receipts".into()));
+            }
+            self.by_call.insert(tool_call_id, receipt);
+        }
+
         Ok(())
     }
 
     /// Record one call id once; identical retries are idempotent.
-    pub fn put(&mut self, receipt: EffectReceipt) -> Result<EffectReceipt, AgentError> {
-        todo!()
+    pub fn put(&mut self, receipt: EffectReceipt) -> Result<&EffectReceipt, AgentError> {
+        let tool_call_id = receipt.tool_call_id.clone();
+        if let Some(previous) = self.get(&tool_call_id) {
+            if previous.receipt_id() != receipt.receipt_id() {
+                return Err(AgentError(format!(
+                    "tool call id {} already has a different receipt",
+                    tool_call_id
+                )));
+            }
+        } else {
+            if let Some(path) = &self.path {
+                let mut content = receipt.to_string()?;
+                content.push('\n');
+                append_to_file(path, &[content.as_bytes()])?;
+            }
+
+            self.by_call.insert(tool_call_id.clone(), receipt);
+        }
+
+        // write JSONL to self.path
+        Ok(self.by_call.get(&tool_call_id).unwrap())
     }
 
     /// Return a receipt by tool call id, if present.
     pub fn get(&self, tool_call_id: &str) -> Option<&EffectReceipt> {
-        todo!()
+        self.by_call.get(tool_call_id)
     }
 }

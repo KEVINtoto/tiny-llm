@@ -90,11 +90,17 @@ fn test_task_2_lists_and_reads_workspace_files() {
             .collect()
     );
     assert_eq!(
-        workspace.list_files(".").unwrap(),
+        workspace.execute(&test_utils::list_files_action("."), None),
         "file README.md\ndir src"
     );
-    assert_eq!(workspace.list_files("src").unwrap(), "file src/main.py");
-    assert_eq!(workspace.read_file("README.md").unwrap(), "hello agent\n");
+    assert_eq!(
+        workspace.execute(&test_utils::list_files_action("src"), None),
+        "file src/main.py"
+    );
+    assert_eq!(
+        workspace.execute(&test_utils::read_file_action("README.md"), None),
+        "hello agent\n"
+    );
 }
 
 #[test]
@@ -124,7 +130,10 @@ fn test_task_3_rejects_escapes_secrets_and_symlinks() {
             "expected path to be rejected: {raw:?}"
         );
     }
-    assert_eq!(workspace.list_files(".").unwrap(), "file visible.txt");
+    assert_eq!(
+        workspace.execute(&test_utils::list_files_action("."), None),
+        "file visible.txt"
+    );
 }
 
 #[test]
@@ -140,14 +149,14 @@ fn test_task_4_bounds_directory_and_file_observations() {
 
     assert_eq!(
         workspace
-            .list_files(".")
-            .unwrap()
+            .execute(&test_utils::list_files_action("."), None)
             .lines()
             .collect::<Vec<_>>(),
         vec!["file a.txt", "file b.txt"]
     );
-    let error = workspace.read_file("large.txt").unwrap_err();
-    assert!(error.to_string().contains("exceeds 5 bytes"));
+    let error = workspace.execute(&test_utils::read_file_action("large.txt"), None);
+    assert!(error.starts_with("error:"));
+    assert!(error.contains("exceeds 5 bytes"));
 }
 
 #[test]
@@ -159,10 +168,12 @@ fn test_task_5_rejects_directories_and_non_utf8_files() {
     fs::write(root.join("binary.bin"), [0xff]).unwrap();
     let mut workspace = test_utils::make_workspace(&root);
 
-    let directory_error = workspace.read_file("folder").unwrap_err();
-    assert!(directory_error.to_string().contains("regular file"));
-    let encoding_error = workspace.read_file("binary.bin").unwrap_err();
-    assert!(encoding_error.to_string().contains("UTF-8"));
+    let directory_error = workspace.execute(&test_utils::read_file_action("folder"), None);
+    assert!(directory_error.starts_with("error:"));
+    assert!(directory_error.contains("regular file"));
+    let encoding_error = workspace.execute(&test_utils::read_file_action("binary.bin"), None);
+    assert!(encoding_error.starts_with("error:"));
+    assert!(encoding_error.contains("UTF-8"));
 }
 
 #[test]

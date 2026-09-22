@@ -300,7 +300,7 @@ fn test_task_1_structured_denial_requires_and_exposes_one_operator_reason() {
         })),
         receipts,
     );
-    workspace.read_file("app.py").expect("observe before edit");
+    workspace.execute(&ToolAction::ReadFile { path: "app.py".into()}, None);
 
     let result = workspace.execute(
         &test_utils::tool_action(
@@ -334,7 +334,7 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
         Some(Box::new(|_action| ConfirmResult::Approved(true))),
         ReceiptStore::new(None).expect("receipt store"),
     );
-    allowed.read_file("app.py").expect("observe before edit");
+    allowed.execute(&test_utils::read_file_action("app.py"), None);
     assert_eq!(
         allowed.execute(
             &test_utils::tool_action(
@@ -352,7 +352,7 @@ fn test_task_1_legacy_boolean_approval_remains_compatible() {
         Some(Box::new(|_action| ConfirmResult::Approved(false))),
         ReceiptStore::new(None).expect("receipt store"),
     );
-    denied.read_file("app.py").expect("observe before edit");
+    denied.execute(&test_utils::read_file_action("app.py"), None);
     assert_eq!(
         denied.execute(
             &test_utils::tool_action(
@@ -679,7 +679,7 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
             .receipt_store
             .get("call-1")
             .expect("base edit receipt")
-            .tool,
+            .tool.tool(),
         "edit_file"
     );
     assert_eq!(
@@ -687,7 +687,7 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
             .receipt_store
             .get("call-2")
             .expect("validation receipt")
-            .tool,
+            .tool.tool(),
         "run_command"
     );
     assert_eq!(
@@ -695,7 +695,7 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
             .receipt_store
             .get("call-1")
             .expect("base edit receipt")
-            .tool,
+            .tool.tool(),
         "edit_file"
     );
     assert!(denied_workspace.receipt_store.get("call-2").is_none());
