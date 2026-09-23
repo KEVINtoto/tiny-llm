@@ -246,7 +246,7 @@ fn run(mut context: Context) -> Result<bool, AgentError> {
         context.request_timeout,
     )?;
 
-    println!("model service> {}", context.base_url);
+    println!("\nmodel service> {}", context.base_url);
     println!("workspace> {}", context.workspace.policy.root.display());
     println!("goal> {}", context.task);
     let mut tools: Vec<_> = context
