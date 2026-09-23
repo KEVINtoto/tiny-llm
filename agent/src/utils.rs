@@ -1,4 +1,11 @@
-use std::{fs, io::Write, path::Path};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::Path,
+    process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 
 use sha2::{Digest, digest::Update};
 
@@ -9,7 +16,7 @@ pub fn get_sha256_of_contents(contents: &[&[u8]]) -> String {
     for &content in contents {
         hasher = hasher.chain(content);
     }
-    hasher.finalize().iter().map(|b| *b as char).collect()
+    format!("{:x}", hasher.finalize())
 }
 
 pub fn get_sha256_of_file(path: &Path) -> Result<String, AgentError> {
@@ -76,4 +83,60 @@ pub fn check_command_line(cmdline: &Vec<String>) -> Result<(), AgentError> {
         }
     }
     Ok(())
+}
+
+pub fn run_command_with_timeout(
+    mut cmdline: Command,
+    timeout: Duration,
+) -> Result<(Output, bool), AgentError> {
+    let mut helper = || -> std::io::Result<(Output, bool)> {
+        let mut child = cmdline
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+
+        let out_reader = thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stdout.read_to_end(&mut bytes)?;
+            Ok::<_, std::io::Error>(bytes)
+        });
+        let err_reader = thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes)?;
+            Ok::<_, std::io::Error>(bytes)
+        });
+
+        let deadline = Instant::now() + timeout;
+        let (status, timed_out) = loop {
+            if let Some(status) = child.try_wait()? {
+                break (status, false);
+            }
+            if Instant::now() >= deadline {
+                child.kill()?;
+                break (child.wait()?, true);
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+
+        let stdout = out_reader
+            .join()
+            .map_err(|_| std::io::Error::other("stdout reader panic"))??;
+        let stderr = err_reader
+            .join()
+            .map_err(|_| std::io::Error::other("stderr reader panic"))??;
+
+        Ok((
+            Output {
+                status,
+                stdout,
+                stderr,
+            },
+            timed_out,
+        ))
+    };
+
+    helper().map_err(to_agent_error)
 }

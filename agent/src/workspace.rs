@@ -20,7 +20,7 @@ use crate::protocol::{
 use crate::receipts::ReceiptStore;
 use crate::utils::{
     check_command_line, get_sha256_of_contents, get_sha256_of_file, read_content_of_file,
-    to_agent_error, write_to_file,
+    run_command_with_timeout, to_agent_error, write_to_file,
 };
 
 fn is_protected(name: &str) -> bool {
@@ -463,9 +463,11 @@ impl Workspace {
 
         self.confirm(action)?;
 
-        let output = cmd.output().map_err(to_agent_error)?;
+        let (output, timeout) = run_command_with_timeout(
+            cmd,
+            std::time::Duration::from_secs_f64(self.policy.command_timeout_seconds),
+        )?;
         let success = output.status.success();
-        let exit_state = if success { "ok" } else { "error" }.into();
 
         let mut captured = output.stdout;
         captured.extend(output.stderr);
@@ -473,14 +475,18 @@ impl Workspace {
 
         let result = format!(
             "status: {}\noutput:\n{}",
-            output.status.code().unwrap_or(-1),
+            if timeout {
+                "timeout".into()
+            } else {
+                output.status.code().unwrap_or(-1).to_string()
+            },
             String::from_utf8(captured).map_err(to_agent_error)?
         );
 
         self.receipt_store.put(EffectReceipt::new(
             tool_call_id,
             action.clone(),
-            exit_state,
+            if !timeout && success { "ok" } else { "error" }.into(),
             result.clone(),
             vec![],
         )?)?;
