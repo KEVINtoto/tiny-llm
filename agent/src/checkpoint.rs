@@ -2,15 +2,22 @@
 
 //! Week 4, Day 4 learner surface for checkpoint and resume.
 
+use serde::Serialize;
+
 use crate::generation::Message;
 use crate::protocol::AgentError;
+use crate::utils::{get_sha256_of_contents, to_agent_error};
 
 /// Small fake-model snapshot needed for deterministic course resumption.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ModelCheckpoint {
+    /// the number of semantic messages at the saved boundary.
     pub conversation_position: i64,
+    /// `response_index` tells the model which response comes next.
     pub response_index: i64,
+    /// `cached_token_ids` represents the prompt prefix in the cache,
     pub cached_token_ids: Vec<i64>,
+    /// and every `layer_offsets`` entry must equal its length.
     pub layer_offsets: Vec<i64>,
 }
 
@@ -33,14 +40,39 @@ impl ModelCheckpoint {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        // TODO: validate positions, token ids, and aligned layer offsets.
-        todo!()
+        if self.conversation_position < 0 || self.response_index < 0 {
+            return Err(AgentError(
+                "checkpoint positions must be non-negative integers".into(),
+            ));
+        }
+        if self.cached_token_ids.iter().any(|&token| token < 0) {
+            return Err(AgentError(
+                "cached token ids must be non-negative integers".into(),
+            ));
+        }
+        if self.layer_offsets.is_empty() || self.layer_offsets.iter().any(|&offset| offset < 0) {
+            return Err(AgentError(
+                "checkpoint needs non-negative layer offsets".into(),
+            ));
+        }
+        let cached_len = self.cached_token_ids.len() as i64;
+        if self
+            .layer_offsets
+            .iter()
+            .any(|&offset| offset != cached_len)
+        {
+            return Err(AgentError(
+                "layer offsets must match the cached token prefix".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
 /// Conversation and model state saved after one complete tool observation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct AgentCheckpoint {
+    #[serde(skip_serializing)]
     pub checkpoint_id: String,
     pub task: String,
     pub messages: Vec<(String, String)>,
@@ -48,9 +80,65 @@ pub struct AgentCheckpoint {
 }
 
 impl AgentCheckpoint {
+    const MESSAGE_ROLES: [&'static str; 3] = ["assistant", "system", "user"];
+
+    pub fn new(
+        task: String,
+        messages: Vec<(String, String)>,
+        model: ModelCheckpoint,
+    ) -> Result<Self, AgentError> {
+        let mut ckp = AgentCheckpoint {
+            checkpoint_id: String::new(),
+            task,
+            messages,
+            model,
+        };
+        ckp.checkpoint_id = ckp.checkpoint_id()?;
+        Ok(ckp)
+    }
+
     /// Reject a checkpoint whose identity or conversation position changed.
     pub fn validate(&self) -> Result<(), AgentError> {
-        todo!()
+        if self.task.trim().is_empty() {
+            return Err(AgentError("checkpoint task must not be empty".into()));
+        }
+
+        if self.messages.iter().any(|m| {
+            Self::MESSAGE_ROLES.binary_search(&m.0.as_str()).is_err() || m.1.trim().is_empty()
+        }) {
+            return Err(AgentError("checkpoint messages are invalid".into()));
+        }
+
+        if self.model.conversation_position as usize != self.messages.len() {
+            return Err(AgentError(
+                "model checkpoint does not match the conversation".into(),
+            ));
+        }
+
+        if self.checkpoint_id != self.checkpoint_id()? {
+            return Err(AgentError(
+                "checkpoint identity does not match its content".into(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn checkpoint_id(&self) -> Result<String, AgentError> {
+        let payload = serde_json::to_string(self).map_err(to_agent_error)?;
+        Ok(get_sha256_of_contents(&[payload.as_bytes()]))
+    }
+
+    pub fn get_messages(&self) -> Vec<Message> {
+        let mut messages = Vec::with_capacity(self.messages.len());
+        for (role, content) in &self.messages {
+            let msg = Message::from([
+                ("role".into(), role.clone()),
+                ("content".into(), content.clone()),
+            ]);
+            messages.push(msg);
+        }
+        messages
     }
 }
 
@@ -60,5 +148,26 @@ pub fn create_checkpoint(
     messages: &[Message],
     model: ModelCheckpoint,
 ) -> Result<AgentCheckpoint, AgentError> {
-    todo!()
+    let frozen_messages = messages
+        .iter()
+        .map(|m| -> Result<(String, String), AgentError> {
+            Ok((
+                m.get("role")
+                    .ok_or(AgentError(
+                        "The message must include the `role` field.".into(),
+                    ))?
+                    .clone(),
+                m.get("content")
+                    .ok_or(AgentError(
+                        "The message must include the `content` field.".into(),
+                    ))?
+                    .clone(),
+            ))
+        })
+        .collect::<Result<Vec<_>, AgentError>>()?;
+
+    let checkpoint = AgentCheckpoint::new(task.to_string(), frozen_messages, model)?;
+    checkpoint.validate()?;
+
+    Ok(checkpoint)
 }

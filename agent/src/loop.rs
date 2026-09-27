@@ -11,6 +11,7 @@
 //! learner contract.
 
 use crate::checkpoint::AgentCheckpoint;
+use crate::checkpoint::create_checkpoint;
 use crate::generation::{Generate, Message, initial_messages};
 use crate::protocol::{AgentAction, AgentError, AgentWorkspace, build_system_prompt, parse_action};
 
@@ -97,51 +98,40 @@ pub struct AgentRun {
     pub modified_files: Vec<String>,
 }
 
-/// Append one assistant response and its tool observation.
-pub(crate) fn append_tool_result(
-    messages: &[Message],
-    response: &str,
-    result: &str,
-) -> Vec<Message> {
-    // append assistant + "Tool result: ..." user messages.
-    let mut ret = vec![];
-    ret.extend_from_slice(messages);
-    ret.push(Message::from([
-        ("role".into(), "assistant".into()),
-        ("content".into(), response.into()),
-    ]));
-    ret.push(Message::from([
-        ("role".into(), "user".into()),
-        ("content".into(), format!("Tool result:\n{}", result)),
-    ]));
-    ret
+enum RunTaskResult {
+    Run(AgentRun),
+    CheckPoint(AgentCheckpoint),
 }
 
-/// Run a bounded validated loop over one task.
-///
-/// `workspace` must expose `available_tools` (a frozenset of tool names),
-/// `execute(action)` (returning a result string), and `modified_files`
-/// (an iterable of paths).
-pub fn run_agent(
-    task: Option<&str>,
+fn run_task_loop(
+    task: &str,
+    messages: Option<Vec<Message>>,
     generate: &mut dyn Generate,
     workspace: &mut dyn AgentWorkspace,
+    after_tool_calls: Option<i64>,
     limits: Option<&AgentLimits>,
     on_event: Option<&dyn Fn(&AgentEvent)>,
-) -> Result<AgentRun, AgentError> {
+) -> Result<RunTaskResult, AgentError> {
     // reject an empty task; build the system prompt and initial
     // messages; loop up to max_steps; parse each response with
     // parse_action(response, workspace.available_tools); feed invalid
     // actions back as "error: ..." observations; stop on FinalAction,
     // invalid-action limit, identical-action limit, context limit, and step
     // limit.
-    let system_prompt = build_system_prompt(workspace);
-    let mut messages = initial_messages(task.unwrap_or(""), &system_prompt)?;
+
+    let mut messages = match messages {
+        Some(messages) => messages,
+        None => {
+            let system_prompt = build_system_prompt(workspace);
+            initial_messages(task, &system_prompt)?
+        }
+    };
 
     let mut steps = 0;
     let mut context_chars = 0;
     let mut invalid_actions = 0;
     let mut identical_actions = 0;
+    let mut tool_calls = 0;
 
     let limits = limits.cloned().unwrap_or(AgentLimits::default());
 
@@ -190,6 +180,7 @@ pub fn run_agent(
         match &event.action {
             Some(AgentAction::Tool(tool_action)) => {
                 event.result = Some(workspace.execute(tool_action, None));
+                tool_calls += 1;
                 // messages = append_tool_result(&messages, &event.response, event.result.as_ref().unwrap());
             }
             Some(AgentAction::Final(final_action)) => {
@@ -209,6 +200,14 @@ pub fn run_agent(
             messages = append_tool_result(&messages, &event.response, result);
         }
 
+        if let Some(after_tool_calls) = after_tool_calls
+            && tool_calls == after_tool_calls
+        {
+            let checkpoint =
+                create_checkpoint(task, &messages, generate.save_checkpoint(&messages)?)?;
+            return Ok(RunTaskResult::CheckPoint(checkpoint));
+        }
+
         if let Some(prev_action) = run.events.last().and_then(|e| e.action.as_ref())
             && let Some(curr_action) = event.action.as_ref()
             && prev_action == curr_action
@@ -223,8 +222,55 @@ pub fn run_agent(
         steps += 1;
     }
 
-    // run.modified_files = workspace.modified_files();
+    run.modified_files = workspace.modified_files();
 
+    Ok(RunTaskResult::Run(run))
+}
+
+/// Append one assistant response and its tool observation.
+pub(crate) fn append_tool_result(
+    messages: &[Message],
+    response: &str,
+    result: &str,
+) -> Vec<Message> {
+    // append assistant + "Tool result: ..." user messages.
+    let mut ret = vec![];
+    ret.extend_from_slice(messages);
+    ret.push(Message::from([
+        ("role".into(), "assistant".into()),
+        ("content".into(), response.into()),
+    ]));
+    ret.push(Message::from([
+        ("role".into(), "user".into()),
+        ("content".into(), format!("Tool result:\n{}", result)),
+    ]));
+    ret
+}
+
+/// Run a bounded validated loop over one task.
+///
+/// `workspace` must expose `available_tools` (a frozenset of tool names),
+/// `execute(action)` (returning a result string), and `modified_files`
+/// (an iterable of paths).
+pub fn run_agent(
+    task: Option<&str>,
+    generate: &mut dyn Generate,
+    workspace: &mut dyn AgentWorkspace,
+    limits: Option<&AgentLimits>,
+    on_event: Option<&dyn Fn(&AgentEvent)>,
+) -> Result<AgentRun, AgentError> {
+    let run = match run_task_loop(
+        task.unwrap_or(""),
+        None,
+        generate,
+        workspace,
+        None,
+        limits,
+        on_event,
+    )? {
+        RunTaskResult::Run(run) => run,
+        _ => unreachable!(),
+    };
     Ok(run)
 }
 
@@ -236,7 +282,27 @@ pub fn run_to_checkpoint(
     after_tool_calls: i64,
     limits: Option<&AgentLimits>,
 ) -> Result<AgentCheckpoint, AgentError> {
-    todo!()
+    if after_tool_calls <= 0 {
+        return Err(AgentError(
+            "after_tool_calls must be positive integer".into(),
+        ));
+    }
+
+    let checkpoint = match run_task_loop(
+        task,
+        None,
+        generate,
+        workspace,
+        Some(after_tool_calls),
+        limits,
+        None,
+    )? {
+        RunTaskResult::CheckPoint(checkpoint) => checkpoint,
+        _ => {
+            return Err(AgentError("task ended before checkpoint".into()));
+        }
+    };
+    Ok(checkpoint)
 }
 
 /// Restore a fresh model and continue after the saved tool observation.
@@ -246,5 +312,12 @@ pub fn resume_agent(
     workspace: &mut dyn AgentWorkspace,
     limits: Option<&AgentLimits>,
 ) -> Result<AgentRun, AgentError> {
-    todo!()
+    checkpoint.validate()?;
+    generate.restore_checkpoint(&checkpoint.model)?;
+    let messages = checkpoint.get_messages();
+    let run = match run_task_loop("", Some(messages), generate, workspace, None, limits, None)? {
+        RunTaskResult::Run(run) => run,
+        _ => unreachable!(),
+    };
+    Ok(run)
 }
