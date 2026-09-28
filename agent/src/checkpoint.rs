@@ -135,7 +135,6 @@ impl AgentCheckpoint {
             let msg = Message {
                 role: role.clone(),
                 content: content.clone(),
-                ..Default::default()
             };
             messages.push(msg);
         }

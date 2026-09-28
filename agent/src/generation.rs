@@ -98,12 +98,10 @@ pub fn initial_messages(task: &str, system_prompt: &str) -> Result<Vec<Message>,
         Message {
             role: "system".into(),
             content: system_prompt.into(),
-            ..Default::default()
         },
         Message {
             role: "user".into(),
             content: task.into(),
-            ..Default::default()
         },
     ])
 }

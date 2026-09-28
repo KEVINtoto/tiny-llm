@@ -162,11 +162,9 @@ pub fn run_capstone() -> Value {
     let messages = checkpoint
         .messages
         .iter()
-        .map(|(role, content)| {
-            Message {
-                role: role.clone(),
-                content: content.clone(),
-            }
+        .map(|(role, content)| Message {
+            role: role.clone(),
+            content: content.clone(),
         })
         .collect::<Vec<_>>();
     let compact = compact_completed_interactions(

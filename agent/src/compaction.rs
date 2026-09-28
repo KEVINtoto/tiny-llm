@@ -35,13 +35,9 @@ fn completed_interaction(
         return None;
     }
 
-    let Some(content) = result_message.content.strip_prefix(TOOL_RESULT_PREFIX) else {
-        return None;
-    };
+    let content = result_message.content.strip_prefix(TOOL_RESULT_PREFIX)?;
 
-    let Some(action) = serde_json::from_str::<ToolAction>(&action_message.content).ok() else {
-        return None;
-    };
+    let action = serde_json::from_str::<ToolAction>(&action_message.content).ok()?;
 
     Some((action, content.to_string()))
 }
@@ -136,7 +132,7 @@ pub fn compact_completed_interactions(
         }
     }
 
-    let compact_count = 0.max(matched.len().saturating_sub(keep_recent as usize));
+    let compact_count = matched.len().saturating_sub(keep_recent as usize);
     if compact_count == 0 {
         return Ok(CompactionResult {
             messages: messages.to_vec(),
@@ -147,7 +143,7 @@ pub fn compact_completed_interactions(
         });
     }
     let selected = matched[..compact_count]
-        .into_iter()
+        .iter()
         .map(|(k, v)| (*k, *v))
         .collect::<HashMap<_, _>>();
 

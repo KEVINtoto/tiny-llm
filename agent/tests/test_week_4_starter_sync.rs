@@ -659,10 +659,7 @@ fn test_reference_observation_payload_mutations_are_killed() {
     check(&observed);
     for mutation in ["Tool result:\nwrong payload", "Tool result:"] {
         let mut broken = observed.clone();
-        broken
-            .last_mut()
-            .unwrap()
-            .content = mutation.into();
+        broken.last_mut().unwrap().content = mutation.into();
         assert!(
             catch_unwind(AssertUnwindSafe(|| check(&broken))).is_err(),
             "exact observation guard must kill mutation {mutation:?}"

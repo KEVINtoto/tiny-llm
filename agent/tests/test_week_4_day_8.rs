@@ -653,11 +653,17 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
     assert_eq!(passing.steering, "validate without another edit");
     assert_eq!(failing.steering, "try changing the answer again");
     assert_eq!(
-        validate_model.calls[0].last().expect("steering message").content,
+        validate_model.calls[0]
+            .last()
+            .expect("steering message")
+            .content,
         "Operator steering:\nvalidate without another edit"
     );
     assert_eq!(
-        denied_model.calls[0].last().expect("steering message").content,
+        denied_model.calls[0]
+            .last()
+            .expect("steering message")
+            .content,
         "Operator steering:\ntry changing the answer again"
     );
     assert_eq!(passing.reuse, validate_model.reuse);

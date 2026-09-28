@@ -241,12 +241,10 @@ pub(crate) fn append_tool_result(
     ret.push(Message {
         role: "assistant".into(),
         content: response.into(),
-        ..Default::default()
     });
     ret.push(Message {
         role: "user".into(),
         content: format!("{}{}", TOOL_RESULT_PREFIX, result),
-        ..Default::default()
     });
     ret
 }
