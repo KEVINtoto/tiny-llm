@@ -57,7 +57,7 @@ impl Generate for ScriptedModel {
     fn save_checkpoint(&mut self, messages: &[Message]) -> Result<ModelCheckpoint, AgentError> {
         let tokens = messages
             .iter()
-            .map(|m| m["content"].chars().count() as i64)
+            .map(|m| m.content.chars().count() as i64)
             .collect();
         let model = ModelCheckpoint::new(
             messages.len() as i64,
@@ -163,16 +163,16 @@ pub fn run_capstone() -> Value {
         .messages
         .iter()
         .map(|(role, content)| {
-            Message::from([
-                ("role".into(), role.clone()),
-                ("content".into(), content.clone()),
-            ])
+            Message {
+                role: role.clone(),
+                content: content.clone(),
+            }
         })
         .collect::<Vec<_>>();
     let compact = compact_completed_interactions(
         &messages,
         &receipts,
-        &|ms| ms.iter().map(|m| m["content"].chars().count() as i64).sum(),
+        &|ms| ms.iter().map(|m| m.content.chars().count() as i64).sum(),
         0,
         80,
     )

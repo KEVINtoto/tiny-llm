@@ -132,10 +132,11 @@ impl AgentCheckpoint {
     pub fn get_messages(&self) -> Vec<Message> {
         let mut messages = Vec::with_capacity(self.messages.len());
         for (role, content) in &self.messages {
-            let msg = Message::from([
-                ("role".into(), role.clone()),
-                ("content".into(), content.clone()),
-            ]);
+            let msg = Message {
+                role: role.clone(),
+                content: content.clone(),
+                ..Default::default()
+            };
             messages.push(msg);
         }
         messages
@@ -150,21 +151,8 @@ pub fn create_checkpoint(
 ) -> Result<AgentCheckpoint, AgentError> {
     let frozen_messages = messages
         .iter()
-        .map(|m| -> Result<(String, String), AgentError> {
-            Ok((
-                m.get("role")
-                    .ok_or(AgentError(
-                        "The message must include the `role` field.".into(),
-                    ))?
-                    .clone(),
-                m.get("content")
-                    .ok_or(AgentError(
-                        "The message must include the `content` field.".into(),
-                    ))?
-                    .clone(),
-            ))
-        })
-        .collect::<Result<Vec<_>, AgentError>>()?;
+        .map(|m| (m.role.clone(), m.content.clone()))
+        .collect::<Vec<_>>();
 
     let checkpoint = AgentCheckpoint::new(task.to_string(), frozen_messages, model)?;
     checkpoint.validate()?;

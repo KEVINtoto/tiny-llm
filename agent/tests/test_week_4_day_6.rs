@@ -237,25 +237,25 @@ fn test_task_4_steering_is_one_visible_message_in_stable_order() {
         let steering: Vec<_> = call
             .iter()
             .enumerate()
-            .filter(|(_, message)| message["content"].starts_with("Operator steering:\n"))
+            .filter(|(_, message)| message.content.starts_with("Operator steering:\n"))
             .collect();
         assert_eq!(steering.len(), 1);
         assert_eq!(
             steering[0].0,
             checkpoint.model.conversation_position as usize
         );
-        assert_eq!(steering[0].1["role"], "user");
+        assert_eq!(steering[0].1.role, "user");
         assert_eq!(
-            steering[0].1["content"],
+            steering[0].1.content,
             "Operator steering:\nprioritize b.txt"
         );
     }
     let last_call = fresh.calls.last().unwrap();
     assert_eq!(
-        last_call[last_call.len() - 2]["content"],
+        last_call[last_call.len() - 2].content,
         r#"{"tool":"read_file","path":"b.txt"}"#
     );
-    assert_eq!(last_call.last().unwrap()["content"], "Tool result:\nB\n");
+    assert_eq!(last_call.last().unwrap().content, "Tool result:\nB\n");
     assert_eq!(
         checkpoint.messages.last().unwrap(),
         &("user".to_owned(), "Tool result:\nA\n".to_owned())
@@ -347,12 +347,12 @@ fn test_task_5_steered_resume_does_not_replay_the_completed_edit() {
     assert!(
         visible
             .iter()
-            .any(|message| message["content"] == "fix app.py and validate")
+            .any(|message| message.content == "fix app.py and validate")
     );
     assert!(
         visible
             .iter()
-            .any(|message| message["content"].contains("edited app.py"))
+            .any(|message| message.content.contains("edited app.py"))
     );
     assert_eq!(
         visible[checkpoint.model.conversation_position as usize],

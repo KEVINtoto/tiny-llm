@@ -635,14 +635,14 @@ fn test_real_model_cli_discloses_command_side_effect_scope() {
 #[test]
 fn test_reference_observation_payload_mutations_are_killed() {
     let initial = vec![
-        Message::from([
-            ("role".into(), "system".into()),
-            ("content".into(), "system".into()),
-        ]),
-        Message::from([
-            ("role".into(), "user".into()),
-            ("content".into(), "inspect".into()),
-        ]),
+        Message {
+            role: "system".into(),
+            content: "system".into(),
+        },
+        Message {
+            role: "user".into(),
+            content: "inspect".into(),
+        },
     ];
     let observed = learner_loop::append_tool_result(
         &initial,
@@ -650,9 +650,9 @@ fn test_reference_observation_payload_mutations_are_killed() {
         "exact observable bytes\n",
     );
     let check = |messages: &[Message]| {
-        assert_eq!(messages.last().unwrap()["role"], "user");
+        assert_eq!(messages.last().unwrap().role, "user");
         assert_eq!(
-            messages.last().unwrap()["content"],
+            messages.last().unwrap().content,
             "Tool result:\nexact observable bytes\n"
         );
     };
@@ -662,7 +662,7 @@ fn test_reference_observation_payload_mutations_are_killed() {
         broken
             .last_mut()
             .unwrap()
-            .insert("content".into(), mutation.into());
+            .content = mutation.into();
         assert!(
             catch_unwind(AssertUnwindSafe(|| check(&broken))).is_err(),
             "exact observation guard must kill mutation {mutation:?}"

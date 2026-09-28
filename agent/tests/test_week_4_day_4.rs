@@ -6,7 +6,6 @@
 mod test_utils;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fs;
 use std::rc::Rc;
 
@@ -91,20 +90,20 @@ fn test_task_1_model_checkpoint_has_one_aligned_fake_cache_snapshot() {
 #[test]
 fn test_task_2_agent_checkpoint_binds_task_messages_and_model_state() {
     let mut messages = vec![
-        HashMap::from([
-            ("role".to_owned(), "system".to_owned()),
-            ("content".to_owned(), "system".to_owned()),
-        ]),
-        HashMap::from([
-            ("role".to_owned(), "user".to_owned()),
-            ("content".to_owned(), "inspect".to_owned()),
-        ]),
+        Message {
+            role: "system".to_owned(),
+            content: "system".to_owned(),
+        },
+        Message {
+            role: "user".to_owned(),
+            content: "inspect".to_owned(),
+        },
     ];
     let model = ModelCheckpoint::new(2, 0, vec![6, 7], vec![2]).unwrap();
     let checkpoint = create_checkpoint("inspect", &messages, model.clone()).unwrap();
 
     checkpoint.validate().unwrap();
-    messages[1].insert("content".to_owned(), "changed outside".to_owned());
+    messages[1].content = "changed outside".to_owned();
     assert_eq!(
         checkpoint.messages.last().unwrap(),
         &("user".to_owned(), "inspect".to_owned())

@@ -2,7 +2,11 @@
 
 //! Week 4, Day 5: compact old effect observations without losing evidence.
 
+use std::collections::{HashMap, HashSet};
+
+use crate::ToolAction;
 use crate::generation::Message;
+use crate::r#loop::TOOL_RESULT_PREFIX;
 use crate::protocol::AgentError;
 use crate::receipts::EffectReceipt;
 
@@ -19,7 +23,73 @@ pub struct CompactionResult {
 impl CompactionResult {
     /// Return the exact token reduction reported by the supplied counter.
     pub fn saved_tokens(&self) -> i64 {
-        todo!()
+        self.tokens_before - self.tokens_after
+    }
+}
+
+fn completed_interaction(
+    action_message: &Message,
+    result_message: &Message,
+) -> Option<(ToolAction, String)> {
+    if action_message.role != "assistant" || result_message.role != "user" {
+        return None;
+    }
+
+    let Some(content) = result_message.content.strip_prefix(TOOL_RESULT_PREFIX) else {
+        return None;
+    };
+
+    let Some(action) = serde_json::from_str::<ToolAction>(&action_message.content).ok() else {
+        return None;
+    };
+
+    Some((action, content.to_string()))
+}
+
+fn summary(receipt: &EffectReceipt, result_preview_chars: i64) -> Message {
+    let result_preview_chars = result_preview_chars as usize;
+    let mut result = receipt.result.clone();
+    let result_chars = result.chars().count();
+    if result_chars > result_preview_chars {
+        let omitted = result_chars - result_preview_chars;
+        result = format!(
+            "{}... [{} chars omitted]",
+            result
+                .chars()
+                .take(result_preview_chars)
+                .collect::<String>(),
+            omitted
+        );
+    }
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "changed_artifacts".into(),
+        serde_json::to_value(&receipt.changed_artifacts).expect("changed_artifacts to_value"),
+    );
+
+    payload.insert(
+        "exit_state".into(),
+        serde_json::to_value(receipt.exit_state.clone()).expect("exit_state to_value"),
+    );
+    payload.insert(
+        "receipt_id".into(),
+        serde_json::to_value(receipt.receipt_id()).expect("receipt_id to_value"),
+    );
+    payload.insert(
+        "result_preview".into(),
+        serde_json::to_value(result).expect("result to_value"),
+    );
+    payload.insert(
+        "tool".into(),
+        serde_json::to_value(&receipt.tool).expect("tool to_value"),
+    );
+
+    Message {
+        role: "user".into(),
+        content: format!(
+            "Completed tool interaction (compacted evidence):\n{}",
+            serde_json::to_string(&payload).expect("payload to_string")
+        ),
     }
 }
 
@@ -31,5 +101,90 @@ pub fn compact_completed_interactions(
     keep_recent: i64,
     result_preview_chars: i64,
 ) -> Result<CompactionResult, AgentError> {
-    todo!()
+    if keep_recent < 0 {
+        return Err(AgentError(
+            "keep_recent must be a non-negative integer".into(),
+        ));
+    }
+    if result_preview_chars <= 0 {
+        return Err(AgentError(
+            "result_preview_chars must be a positive integer".into(),
+        ));
+    }
+
+    let tokens_before = count_tokens(messages);
+    if tokens_before < 0 {
+        return Err(AgentError("count_tokens must be a positive integer".into()));
+    }
+    let mut unused_receipt_indexes: HashSet<usize> = (0..receipts.len()).collect();
+    let mut matched = vec![];
+
+    for i in 0..messages.len().saturating_sub(1) {
+        let Some((action, result)) = completed_interaction(&messages[i], &messages[i + 1]) else {
+            continue;
+        };
+
+        for (j, receipt) in receipts.iter().enumerate() {
+            if !unused_receipt_indexes.contains(&j) {
+                continue;
+            }
+            if receipt.tool == action && receipt.result == result {
+                matched.push((i, receipt));
+                unused_receipt_indexes.remove(&j);
+                break;
+            }
+        }
+    }
+
+    let compact_count = 0.max(matched.len().saturating_sub(keep_recent as usize));
+    if compact_count == 0 {
+        return Ok(CompactionResult {
+            messages: messages.to_vec(),
+            compacted_interactions: 0,
+            tokens_before,
+            tokens_after: tokens_before,
+            receipt_ids: vec![],
+        });
+    }
+    let selected = matched[..compact_count]
+        .into_iter()
+        .map(|(k, v)| (*k, *v))
+        .collect::<HashMap<_, _>>();
+
+    let mut compacted = vec![];
+    let mut receipt_ids = vec![];
+    let mut i = 0;
+    while i < messages.len() {
+        let Some(&receipt) = selected.get(&i) else {
+            compacted.push(messages[i].clone());
+            i += 1;
+            continue;
+        };
+        compacted.push(messages[i].clone());
+        compacted.push(summary(receipt, result_preview_chars));
+        receipt_ids.push(receipt.receipt_id());
+        i += 2;
+    }
+
+    let tokens_after = count_tokens(&compacted);
+    if tokens_after < 0 {
+        return Err(AgentError("count_tokens must be a positive integer".into()));
+    }
+    if tokens_after >= tokens_before {
+        return Ok(CompactionResult {
+            messages: messages.to_vec(),
+            compacted_interactions: 0,
+            tokens_before,
+            tokens_after: tokens_before,
+            receipt_ids: vec![],
+        });
+    }
+
+    Ok(CompactionResult {
+        messages: compacted,
+        compacted_interactions: receipt_ids.len() as i64,
+        tokens_before,
+        tokens_after,
+        receipt_ids,
+    })
 }

@@ -227,6 +227,8 @@ fn run_task_loop(
     Ok(RunTaskResult::Run(run))
 }
 
+pub const TOOL_RESULT_PREFIX: &str = "Tool result:\n";
+
 /// Append one assistant response and its tool observation.
 pub(crate) fn append_tool_result(
     messages: &[Message],
@@ -236,14 +238,16 @@ pub(crate) fn append_tool_result(
     // append assistant + "Tool result: ..." user messages.
     let mut ret = vec![];
     ret.extend_from_slice(messages);
-    ret.push(Message::from([
-        ("role".into(), "assistant".into()),
-        ("content".into(), response.into()),
-    ]));
-    ret.push(Message::from([
-        ("role".into(), "user".into()),
-        ("content".into(), format!("Tool result:\n{}", result)),
-    ]));
+    ret.push(Message {
+        role: "assistant".into(),
+        content: response.into(),
+        ..Default::default()
+    });
+    ret.push(Message {
+        role: "user".into(),
+        content: format!("{}{}", TOOL_RESULT_PREFIX, result),
+        ..Default::default()
+    });
     ret
 }
 

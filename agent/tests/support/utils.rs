@@ -49,10 +49,10 @@ pub fn tool_action(tool: &str, arguments: Value) -> ToolAction {
 }
 
 pub fn message(role: &str, content: impl Into<String>) -> Message {
-    Message::from([
-        ("role".into(), role.into()),
-        ("content".into(), content.into()),
-    ])
+    Message {
+        role: role.into(),
+        content: content.into(),
+    }
 }
 
 /// Policy for fake workspaces, without filesystem validation.
@@ -150,7 +150,7 @@ pub fn assert_error_contains<T: std::fmt::Debug>(result: Result<T, AgentError>, 
 pub fn count_fake_tokens(messages: &[Message]) -> i64 {
     messages
         .iter()
-        .map(|message| message["content"].chars().count() as i64)
+        .map(|message| message.content.chars().count() as i64)
         .sum()
 }
 
@@ -223,7 +223,7 @@ pub fn bounded_policy(root: &Path, max_file_bytes: i64, max_list_entries: i64) -
 pub fn fake_token_ids(messages: &[Message]) -> Vec<i64> {
     messages
         .iter()
-        .map(|message| message["content"].chars().count() as i64)
+        .map(|message| message.content.chars().count() as i64)
         .collect()
 }
 

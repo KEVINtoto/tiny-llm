@@ -9,12 +9,17 @@
 //! learner contract.
 
 use std::any::Any;
-use std::collections::HashMap;
+
+use serde::Serialize;
 
 use crate::protocol::AgentError;
 
-/// Python's ``Message = dict[str, str]``.
-pub type Message = HashMap<String, String>;
+/// TODO: comment
+#[derive(Default, Debug, Clone, PartialEq, Serialize)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
 
 /// A model callable, optionally able to save and restore a conversation prefix.
 pub trait Generate {
@@ -90,14 +95,16 @@ pub fn initial_messages(task: &str, system_prompt: &str) -> Result<Vec<Message>,
         return Err(AgentError("task must not be empty".into()));
     }
     Ok(vec![
-        Message::from([
-            ("role".into(), "system".into()),
-            ("content".into(), system_prompt.into()),
-        ]),
-        Message::from([
-            ("role".into(), "user".into()),
-            ("content".into(), task.into()),
-        ]),
+        Message {
+            role: "system".into(),
+            content: system_prompt.into(),
+            ..Default::default()
+        },
+        Message {
+            role: "user".into(),
+            content: task.into(),
+            ..Default::default()
+        },
     ])
 }
 

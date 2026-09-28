@@ -88,11 +88,11 @@ fn test_task_2_compact_record_retains_the_evidence_needed_for_a_final_answer() {
         80,
     )
     .unwrap();
-    let compacted = &result.messages[3]["content"];
+    let compacted = &result.messages[3].content;
 
     assert!(compacted.contains("Completed tool interaction (compacted evidence)"));
     assert_eq!(result.messages[2], messages[2]);
-    assert_eq!(result.messages[3]["role"], "user");
+    assert_eq!(result.messages[3].role, "user");
     assert!(compacted.contains(&command.receipt_id()));
     assert!(compacted.contains(r#""tool":"run_command""#));
     assert!(compacted.contains(r#""exit_state":"ok""#));
@@ -215,7 +215,7 @@ fn test_task_5_compacted_view_continues_through_the_existing_model_protocol() {
             final_: "app.py was edited and validation passed".to_owned()
         })
     );
-    assert!(seen[3]["content"].contains(&command.receipt_id()));
+    assert!(seen[3].content.contains(&command.receipt_id()));
 }
 
 #[test]

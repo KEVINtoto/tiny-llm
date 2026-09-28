@@ -201,9 +201,9 @@ impl GenerationTokenizer for CharacterTokenizer {
         let mut rendered = String::new();
         for message in messages {
             rendered.push('<');
-            rendered.push_str(&message["role"]);
+            rendered.push_str(&message.role);
             rendered.push('>');
-            rendered.push_str(&message["content"]);
+            rendered.push_str(&message.content);
             rendered.push('\n');
         }
         if add_generation_prompt {
@@ -653,11 +653,11 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
     assert_eq!(passing.steering, "validate without another edit");
     assert_eq!(failing.steering, "try changing the answer again");
     assert_eq!(
-        validate_model.calls[0].last().expect("steering message")["content"],
+        validate_model.calls[0].last().expect("steering message").content,
         "Operator steering:\nvalidate without another edit"
     );
     assert_eq!(
-        denied_model.calls[0].last().expect("steering message")["content"],
+        denied_model.calls[0].last().expect("steering message").content,
         "Operator steering:\ntry changing the answer again"
     );
     assert_eq!(passing.reuse, validate_model.reuse);
@@ -720,7 +720,7 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
         .calls
         .iter()
         .flatten()
-        .map(|message| message["content"].as_str())
+        .map(|message| message.content.as_str())
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(visible.matches("keep the requested answer at 2").count(), 1);
