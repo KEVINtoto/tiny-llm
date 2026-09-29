@@ -105,6 +105,131 @@ pub fn action_schema() -> Schema {
     schema_for!(AgentAction)
 }
 
+struct UniqueJsonObject(serde_json::Map<String, serde_json::Value>);
+
+impl<'de> Deserialize<'de> for UniqueJsonObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct UniqueJsonObjectVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for UniqueJsonObjectVisitor {
+            type Value = UniqueJsonObject;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a JSON object without duplicate fields")
+            }
+
+            fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut object = serde_json::Map::new();
+                while let Some((key, value)) = access.next_entry::<String, serde_json::Value>()? {
+                    if object.contains_key(&key) {
+                        return Err(serde::de::Error::custom(format!("duplicate field `{key}`")));
+                    }
+                    object.insert(key, value);
+                }
+                Ok(UniqueJsonObject(object))
+            }
+        }
+
+        deserializer.deserialize_map(UniqueJsonObjectVisitor)
+    }
+}
+
+pub(crate) fn parse_action_details(response: &str) -> Result<AgentAction, AgentError> {
+    let raw: serde_json::Value = serde_json::from_str(response)
+        .map_err(|error| AgentError(format!("not valid JSON: {error}")))?;
+    let parsed_object = raw
+        .as_object()
+        .ok_or_else(|| AgentError("response must be a JSON object".into()))?;
+    let mut deserializer = serde_json::Deserializer::from_str(response);
+    let UniqueJsonObject(object) = UniqueJsonObject::deserialize(&mut deserializer)
+        .map_err(|error| AgentError(format!("invalid action: {error}")))?;
+    debug_assert_eq!(parsed_object, &object);
+
+    if object.contains_key("final") {
+        if object.len() != 1 || !object["final"].is_string() {
+            return Err(AgentError(
+                "final action must contain only a string 'final' field".into(),
+            ));
+        }
+        if object["final"]
+            .as_str()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(AgentError("final response must not be empty".into()));
+        }
+        return serde_json::from_value(raw)
+            .map_err(|error| AgentError(format!("invalid final action: {error}")));
+    }
+
+    let tool = object
+        .get("tool")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| AgentError("tool action requires a string 'tool' field".into()))?;
+    let (required, optional): (&[&str], &[&str]) = match tool {
+        LIST_FILES_TOOL_NAME => (&[], &["path"]),
+        READ_FILE_TOOL_NAME => (&["path"], &[]),
+        WRITE_FILE_TOOL_NAME => (&["path", "content"], &[]),
+        EDIT_FILE_TOOL_NAME => (&["path", "old", "new"], &[]),
+        RUN_COMMAND_TOOL_NAME => (&["argv"], &[]),
+        _ => return Err(AgentError(format!("unknown tool: {tool}"))),
+    };
+
+    let supplied = object
+        .keys()
+        .filter(|key| key.as_str() != "tool")
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let missing = required
+        .iter()
+        .copied()
+        .filter(|field| !supplied.contains(field))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(AgentError(format!(
+            "missing fields for {tool}: {}",
+            missing.join(", ")
+        )));
+    }
+    let unexpected = supplied
+        .iter()
+        .copied()
+        .filter(|field| !required.contains(field) && !optional.contains(field))
+        .collect::<Vec<_>>();
+    if !unexpected.is_empty() {
+        return Err(AgentError(format!(
+            "unexpected fields for {tool}: {}",
+            unexpected.join(", ")
+        )));
+    }
+
+    for field in ["path", "content", "old", "new"] {
+        if object.get(field).is_some_and(|value| !value.is_string()) {
+            return Err(AgentError(format!("{field} must be a string")));
+        }
+    }
+    if let Some(argv) = object.get("argv") {
+        let valid = argv.as_array().is_some_and(|parts| {
+            !parts.is_empty()
+                && parts
+                    .iter()
+                    .all(|part| part.as_str().is_some_and(|part| !part.is_empty()))
+        });
+        if !valid {
+            return Err(AgentError(
+                "argv must be a non-empty array of non-empty strings".into(),
+            ));
+        }
+    }
+
+    serde_json::from_value(raw).map_err(|error| AgentError(format!("invalid tool action: {error}")))
+}
+
 /// The duck-typed workspace surface Python passes around as ``Any``.
 ///
 /// ``run_agent`` documents it as ``available_tools`` (a set of tool names),
@@ -129,8 +254,8 @@ pub fn parse_action(
     response: &str,
     available_tools: Option<&HashSet<String>>,
 ) -> Result<AgentAction, AgentError> {
-    let action: AgentAction =
-        serde_json::from_str(response).map_err(|e| AgentError(format!("invalid action: {e}")))?;
+    let action = parse_action_details(response)
+        .map_err(|error| AgentError(format!("invalid action: {error}")))?;
 
     if let AgentAction::Tool(tool_action) = &action {
         let tool = tool_action.tool();
