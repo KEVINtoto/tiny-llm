@@ -2,29 +2,29 @@
 
 //! Week 4, Day 7: evaluate one run from declared observable facts.
 
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::path::Path;
+
 use crate::r#loop::AgentRun;
-use crate::protocol::AgentError;
+use crate::protocol::{AgentAction, AgentError};
+use crate::receipts::EffectReceipt;
 use crate::receipts::ReceiptStore;
+use crate::utils::read_content_of_file;
 use crate::workspace::Workspace;
 
 /// A fallible, immutable receipt view for evaluation (including persisted logs).
 pub trait ReceiptLookup {
     fn snapshot(&self) -> Result<Box<dyn ReceiptLookup>, AgentError>;
-    fn get_receipt(
-        &self,
-        tool_call_id: &str,
-    ) -> Result<Option<crate::receipts::EffectReceipt>, AgentError>;
+    fn get_receipt(&self, tool_call_id: &str) -> Result<Option<EffectReceipt>, AgentError>;
 }
 
 impl ReceiptLookup for ReceiptStore {
     fn snapshot(&self) -> Result<Box<dyn ReceiptLookup>, AgentError> {
-        // TODO: reopen persisted logs to detect tampering, or snapshot memory.
-        todo!()
+        // reopen persisted logs to detect tampering, or snapshot memory.
+        Ok(Box::new(Self::new(self.path.clone())?))
     }
-    fn get_receipt(
-        &self,
-        tool_call_id: &str,
-    ) -> Result<Option<crate::receipts::EffectReceipt>, AgentError> {
+    fn get_receipt(&self, tool_call_id: &str) -> Result<Option<EffectReceipt>, AgentError> {
         Ok(self.get(tool_call_id).cloned())
     }
 }
@@ -45,7 +45,7 @@ impl FileExpectation {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        todo!()
+        expect_path(&self.path, "file path")
     }
 }
 
@@ -65,7 +65,8 @@ impl ResultExpectation {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        todo!()
+        expect_text(&self.tool, "result tool")?;
+        expect_text(&self.contains, "result substring")
     }
 }
 
@@ -101,7 +102,18 @@ impl ReceiptExpectation {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        todo!()
+        expect_text(&self.tool_call_id, "receipt call id")?;
+        expect_text(&self.tool, "receipt tool")?;
+        if self.exit_state != "ok" && self.exit_state != "error" {
+            return Err(AgentError(
+                "receipt exit_state must be 'ok' or 'error'".into(),
+            ));
+        }
+        expect_text(&self.result_contains, "receipt result substring")?;
+        for artifact in &self.changed_artifacts {
+            expect_path(artifact, "changed artifact")?;
+        }
+        Ok(())
     }
 }
 
@@ -136,12 +148,34 @@ impl EvaluationCase {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        todo!()
+        expect_text(&self.final_contains, "final substring")?;
+
+        let file_paths = self
+            .files
+            .iter()
+            .map(|f| Path::new(&f.path))
+            .collect::<HashSet<_>>();
+        if file_paths.len() != self.files.len() {
+            return Err(AgentError("evaluation file paths must be unique".into()));
+        }
+
+        let call_ids = self
+            .receipts
+            .iter()
+            .map(|r| &r.tool_call_id)
+            .collect::<HashSet<_>>();
+        if call_ids.len() != self.receipts.len() {
+            return Err(AgentError(
+                "evaluation receipt call ids must be unique".into(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
 /// One named PASS/FAIL result backed by an observable fact.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EvaluationCheck {
     pub name: String,
     pub passed: bool,
@@ -156,11 +190,27 @@ pub struct EvaluationReport {
 
 impl EvaluationReport {
     pub fn passed(&self) -> bool {
-        todo!()
+        self.checks.iter().all(|c| c.passed)
     }
 
     pub fn render(&self) -> String {
-        todo!()
+        let passed_to_string = |passed| if passed { "PASS" } else { "FAIL" };
+
+        let mut rendered_items = vec![String::from("evaluation: ")];
+        let mut passed = true;
+        for check in &self.checks {
+            if !check.passed {
+                passed = false;
+            }
+            rendered_items.push(format!(
+                "- {}: {} ({})",
+                check.name,
+                passed_to_string(check.passed),
+                check.detail,
+            ));
+        }
+        rendered_items[0].push_str(passed_to_string(passed));
+        rendered_items.join("\n")
     }
 }
 
@@ -171,5 +221,142 @@ pub fn evaluate_run(
     receipts: &dyn ReceiptLookup,
     case: &EvaluationCase,
 ) -> EvaluationReport {
-    todo!()
+    let final_ok = run.completed
+        && run
+            .final_
+            .as_ref()
+            .is_some_and(|final_| final_.contains(&case.final_contains));
+
+    let mut checks = vec![EvaluationCheck {
+        name: "final".into(),
+        passed: final_ok,
+        detail: (if final_ok {
+            "required final observed"
+        } else {
+            "required final not observed"
+        })
+        .into(),
+    }];
+
+    checks.extend(case.files.iter().map(|file| {
+        let name = format!("file:{}", file.path);
+        let observed_or_error = match workspace.resolve_path(&file.path, true) {
+            Ok((absolute, _)) => read_content_of_file(&absolute),
+            Err(e) => Err(e),
+        };
+        let passed = match observed_or_error {
+            Ok(observed) => observed == file.content,
+            Err(error) => {
+                return EvaluationCheck {
+                    name,
+                    passed: false,
+                    detail: format!("evidence unavailable: {}", error),
+                };
+            }
+        };
+
+        EvaluationCheck {
+            name,
+            passed,
+            detail: (if passed {
+                "content matches"
+            } else {
+                "content does not match"
+            })
+            .into(),
+        }
+    }));
+
+    checks.extend(case.results.iter().map(|result| {
+        let name = format!("result:{}", result.tool);
+        let passed = run.events.iter().any(|e| {
+            e.action.as_ref().is_some_and(|a| match a {
+                AgentAction::Tool(action) => action.tool() == result.tool,
+                _ => false,
+            }) && e
+                .result
+                .as_ref()
+                .is_some_and(|r| r.contains(&result.contains))
+        });
+        EvaluationCheck {
+            name,
+            passed,
+            detail: (if passed {
+                "required result observed"
+            } else {
+                "required result not observed"
+            })
+            .into(),
+        }
+    }));
+
+    let receipts_or_error = receipts.snapshot();
+    checks.extend(case.receipts.iter().map(|expected| {
+        let name = format!("receipt:{}", expected.tool_call_id);
+        let receipts = match &receipts_or_error {
+            Ok(box_receipts) => box_receipts.as_ref(),
+            Err(error) => {
+                return EvaluationCheck {
+                    name,
+                    passed: false,
+                    detail: format!("receipt evidence unavailable: {error}"),
+                };
+            }
+        };
+        let passed = match receipts.get_receipt(&expected.tool_call_id) {
+            Ok(receipt_or_none) => {
+                let Some(receipt) = receipt_or_none else {
+                    return EvaluationCheck {
+                        name,
+                        passed: false,
+                        detail: "receipt is absent".into(),
+                    };
+                };
+                receipt.tool.tool() == expected.tool
+                    && receipt.exit_state == expected.exit_state
+                    && receipt.result.contains(&expected.result_contains)
+                    && receipt.changed_artifacts == expected.changed_artifacts
+            }
+            Err(error) => {
+                return EvaluationCheck {
+                    name,
+                    passed: false,
+                    detail: format!("receipt lookup failed: {error}"),
+                };
+            }
+        };
+
+        EvaluationCheck {
+            name,
+            passed,
+            detail: (if passed {
+                "receipt facts match"
+            } else {
+                "receipt facts do not match"
+            })
+            .into(),
+        }
+    }));
+
+    EvaluationReport { checks }
+}
+
+fn expect_text(content: &str, name: &str) -> Result<(), AgentError> {
+    if content.trim().is_empty() {
+        return Err(AgentError(format!("{} must not be blank", name)));
+    }
+    Ok(())
+}
+
+fn expect_path(path_str: &str, name: &str) -> Result<(), AgentError> {
+    expect_text(path_str, name)?;
+    let path = Path::new(path_str);
+    if path_str.contains('\0')
+        || path.is_absolute()
+        || path == Path::new(".")
+        || path.iter().any(|c| c == OsStr::new(".."))
+    {
+        return Err(AgentError(format!("{name} must be a relative file path")));
+    }
+    Ok(())
 }
