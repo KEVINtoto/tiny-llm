@@ -98,12 +98,12 @@ pub struct AgentRun {
     pub modified_files: Vec<String>,
 }
 
-enum RunTaskResult {
+pub(crate) enum RunTaskResult {
     Run(AgentRun),
     CheckPoint(AgentCheckpoint),
 }
 
-fn run_task_loop(
+pub(crate) fn run_task_loop(
     task: &str,
     messages: Option<Vec<Message>>,
     generate: &mut dyn Generate,

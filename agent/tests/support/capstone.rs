@@ -159,14 +159,7 @@ pub fn run_capstone() -> Value {
         .iter()
         .map(|id| base_workspace.receipt_store.get(id).unwrap().clone())
         .collect();
-    let messages = checkpoint
-        .messages
-        .iter()
-        .map(|(role, content)| Message {
-            role: role.clone(),
-            content: content.clone(),
-        })
-        .collect::<Vec<_>>();
+    let messages = checkpoint.messages.clone();
     let compact = compact_completed_interactions(
         &messages,
         &receipts,

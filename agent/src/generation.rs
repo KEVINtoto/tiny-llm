@@ -15,7 +15,7 @@ use serde::Serialize;
 use crate::protocol::AgentError;
 
 /// TODO: comment
-#[derive(Default, Debug, Clone, PartialEq, Serialize)]
+#[derive(Default, Debug, Clone, Eq, Hash, PartialEq, Serialize)]
 pub struct Message {
     pub role: String,
     pub content: String,

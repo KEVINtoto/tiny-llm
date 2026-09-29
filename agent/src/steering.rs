@@ -2,10 +2,12 @@
 
 //! Week 4, Day 6: inspect and steer one paused checkpoint.
 
+use crate::ToolAction;
 use crate::checkpoint::AgentCheckpoint;
-use crate::generation::Generate;
-use crate::r#loop::{AgentLimits, AgentRun};
-use crate::protocol::{AgentError, AgentWorkspace};
+use crate::generation::{Generate, Message};
+use crate::r#loop::RunTaskResult::Run;
+use crate::r#loop::{AgentLimits, AgentRun, TOOL_RESULT_PREFIX, run_task_loop};
+use crate::protocol::{AgentAction, AgentError, AgentWorkspace, parse_action_details};
 
 /// Public facts available at one complete-observation pause.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,7 +23,23 @@ pub fn inspect_checkpoint(
     checkpoint: &AgentCheckpoint,
     evidence_chars: i64,
 ) -> Result<AgentStatus, AgentError> {
-    todo!()
+    if evidence_chars <= 0 {
+        return Err(AgentError(
+            "evidence_chars must be a positive integer".into(),
+        ));
+    }
+
+    let (action, result) = completed_tool_boundary(checkpoint)?;
+
+    Ok(AgentStatus {
+        task: checkpoint.task.clone(),
+        last_action: serde_json::to_string(&action).expect("action to_string"),
+        last_evidence: bounded_preview(result, evidence_chars as usize),
+        next_step: format!(
+            "resume the model after the completed {} observation",
+            action.tool()
+        ),
+    })
 }
 
 /// Append one visible operator message and resume from the saved prefix.
@@ -32,5 +50,59 @@ pub fn resume_with_steering(
     workspace: &mut dyn AgentWorkspace,
     limits: Option<&AgentLimits>,
 ) -> Result<AgentRun, AgentError> {
-    todo!()
+    if steering.trim().is_empty() {
+        return Err(AgentError("steering must not be empty".into()));
+    }
+
+    let _ = completed_tool_boundary(checkpoint)?;
+
+    generate.restore_checkpoint(&checkpoint.model)?;
+
+    let mut messages = checkpoint.messages.clone();
+    messages.push(Message {
+        role: "user".into(),
+        content: format!("Operator steering:\n{}", steering),
+    });
+
+    match run_task_loop("", Some(messages), generate, workspace, None, limits, None)? {
+        Run(run) => Ok(run),
+        _ => unreachable!(),
+    }
+}
+
+fn completed_tool_boundary(checkpoint: &AgentCheckpoint) -> Result<(ToolAction, &str), AgentError> {
+    checkpoint.validate()?;
+
+    let err = Err(AgentError(
+        "checkpoint does not end at a complete tool observation".into(),
+    ));
+    let len = checkpoint.messages.len();
+    if len < 2 {
+        return err;
+    }
+    let (action_message, result_message) =
+        (&checkpoint.messages[len - 2], &checkpoint.messages[len - 1]);
+    let Some(tool_result) = result_message.content.strip_prefix(TOOL_RESULT_PREFIX) else {
+        return err;
+    };
+    if action_message.role != "assistant" || result_message.role != "user" {
+        return err;
+    }
+
+    let action = parse_action_details(&action_message.content)?;
+
+    match action {
+        AgentAction::Tool(tool_action) => Ok((tool_action, tool_result)),
+        _ => Err(AgentError("expected a tool action".into())),
+    }
+}
+
+fn bounded_preview(content: &str, limit: usize) -> String {
+    if content.len() <= limit {
+        return content.into();
+    }
+    if limit == 1 {
+        return "…".into();
+    }
+    format!("{}…", &content[..limit - 1])
 }

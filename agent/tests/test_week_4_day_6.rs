@@ -90,7 +90,7 @@ fn test_task_1_status_reports_only_the_complete_checkpoint_boundary() {
     assert_eq!(status.task, "inspect the project");
     assert_eq!(
         status.last_action,
-        r#"{"path":"README.md","tool":"read_file"}"#
+        r#"{"tool":"read_file","path":"README.md"}"#
     );
     assert_eq!(status.last_evidence, "project evidence\n");
     assert_eq!(
@@ -114,9 +114,10 @@ fn test_task_2_status_preview_is_bounded_and_inspection_is_pure() {
 
     assert_eq!(status.last_evidence, "abcd…");
     assert_eq!(status.last_evidence.chars().count(), 5);
+    assert_eq!(checkpoint.messages.last().unwrap().role, "user");
     assert_eq!(
-        checkpoint.messages.last().unwrap(),
-        &("user".to_owned(), "Tool result:\nabcdefghij".to_owned())
+        checkpoint.messages.last().unwrap().content,
+        "Tool result:\nabcdefghij"
     );
     assert_eq!(checkpoint.model, model);
     test_utils::assert_error_contains(inspect_checkpoint(&checkpoint, 0), "positive integer");
@@ -256,9 +257,10 @@ fn test_task_4_steering_is_one_visible_message_in_stable_order() {
         r#"{"tool":"read_file","path":"b.txt"}"#
     );
     assert_eq!(last_call.last().unwrap().content, "Tool result:\nB\n");
+    assert_eq!(checkpoint.messages.last().unwrap().role, "user");
     assert_eq!(
-        checkpoint.messages.last().unwrap(),
-        &("user".to_owned(), "Tool result:\nA\n".to_owned())
+        checkpoint.messages.last().unwrap().content,
+        "Tool result:\nA\n"
     );
 }
 

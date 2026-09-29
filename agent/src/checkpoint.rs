@@ -75,7 +75,7 @@ pub struct AgentCheckpoint {
     #[serde(skip_serializing)]
     pub checkpoint_id: String,
     pub task: String,
-    pub messages: Vec<(String, String)>,
+    pub messages: Vec<Message>,
     pub model: ModelCheckpoint,
 }
 
@@ -84,7 +84,7 @@ impl AgentCheckpoint {
 
     pub fn new(
         task: String,
-        messages: Vec<(String, String)>,
+        messages: Vec<Message>,
         model: ModelCheckpoint,
     ) -> Result<Self, AgentError> {
         let mut ckp = AgentCheckpoint {
@@ -104,7 +104,8 @@ impl AgentCheckpoint {
         }
 
         if self.messages.iter().any(|m| {
-            Self::MESSAGE_ROLES.binary_search(&m.0.as_str()).is_err() || m.1.trim().is_empty()
+            Self::MESSAGE_ROLES.binary_search(&m.role.as_str()).is_err()
+                || m.content.trim().is_empty()
         }) {
             return Err(AgentError("checkpoint messages are invalid".into()));
         }
@@ -131,10 +132,10 @@ impl AgentCheckpoint {
 
     pub fn get_messages(&self) -> Vec<Message> {
         let mut messages = Vec::with_capacity(self.messages.len());
-        for (role, content) in &self.messages {
+        for msg in &self.messages {
             let msg = Message {
-                role: role.clone(),
-                content: content.clone(),
+                role: msg.role.clone(),
+                content: msg.content.clone(),
             };
             messages.push(msg);
         }
@@ -148,10 +149,7 @@ pub fn create_checkpoint(
     messages: &[Message],
     model: ModelCheckpoint,
 ) -> Result<AgentCheckpoint, AgentError> {
-    let frozen_messages = messages
-        .iter()
-        .map(|m| (m.role.clone(), m.content.clone()))
-        .collect::<Vec<_>>();
+    let frozen_messages = messages.to_vec();
 
     let checkpoint = AgentCheckpoint::new(task.to_string(), frozen_messages, model)?;
     checkpoint.validate()?;

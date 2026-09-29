@@ -104,10 +104,8 @@ fn test_task_2_agent_checkpoint_binds_task_messages_and_model_state() {
 
     checkpoint.validate().unwrap();
     messages[1].content = "changed outside".to_owned();
-    assert_eq!(
-        checkpoint.messages.last().unwrap(),
-        &("user".to_owned(), "inspect".to_owned())
-    );
+    assert_eq!(checkpoint.messages.last().unwrap().role, "user");
+    assert_eq!(checkpoint.messages.last().unwrap().content, "inspect");
 
     let mismatched_model = ModelCheckpoint {
         conversation_position: 3,
@@ -123,8 +121,14 @@ fn test_task_2_agent_checkpoint_binds_task_messages_and_model_state() {
     test_utils::assert_error_contains(changed.validate(), "identity");
 
     let mut changed = checkpoint.clone();
-    changed.messages[1] = ("user".to_owned(), "respect".to_owned());
-    assert_eq!(changed.messages[1].1.len(), checkpoint.messages[1].1.len());
+    changed.messages[1] = Message {
+        role: "user".to_owned(),
+        content: "respect".to_owned(),
+    };
+    assert_eq!(
+        changed.messages[1].content.len(),
+        checkpoint.messages[1].content.len()
+    );
     test_utils::assert_error_contains(changed.validate(), "identity");
 
     let mut changed = checkpoint.clone();
@@ -142,7 +146,10 @@ fn test_task_2_agent_checkpoint_binds_task_messages_and_model_state() {
     // A tuple of the wrong arity cannot be represented by the Rust field type;
     // an invalid role exercises the corresponding malformed-message check.
     let mut changed = checkpoint;
-    changed.messages = vec![("invalid".to_owned(), "message".to_owned())];
+    changed.messages = vec![Message {
+        role: "invalid".to_owned(),
+        content: "message".to_owned(),
+    }];
     changed.model.conversation_position = 1;
     test_utils::assert_error_contains(changed.validate(), "messages");
 }
@@ -164,14 +171,17 @@ fn test_task_3_checkpoint_is_saved_after_the_complete_tool_observation() {
     assert_eq!(checkpoint.messages.len(), 4);
     assert_eq!(
         checkpoint.messages[checkpoint.messages.len() - 2],
-        (
-            "assistant".to_owned(),
-            r#"{"tool":"read_file","path":"README.md"}"#.to_owned()
-        )
+        Message {
+            role: "assistant".to_owned(),
+            content: r#"{"tool":"read_file","path":"README.md"}"#.to_owned(),
+        }
     );
     assert_eq!(
         checkpoint.messages.last().unwrap(),
-        &("user".to_owned(), "Tool result:\nhello\n".to_owned())
+        &Message {
+            role: "user".to_owned(),
+            content: "Tool result:\nhello\n".to_owned(),
+        }
     );
 }
 
