@@ -7,11 +7,13 @@ use std::rc::Rc;
 
 use crate::checkpoint::{AgentCheckpoint, ModelCheckpoint};
 use crate::evaluation::{EvaluationCase, EvaluationReport};
-use crate::generation::{Generate, GenerationModel, GenerationTokenizer, Message};
+use crate::generation::{Generate, GenerationCache, GenerationModel, GenerationTokenizer, Message};
 use crate::r#loop::{AgentLimits, AgentRun};
 use crate::protocol::AgentError;
 use crate::receipts::ReceiptStore;
+use crate::utils::to_agent_error;
 use crate::workspace::Workspace;
+use crate::{evaluate_run, resume_with_steering};
 
 /// Observable token and cache positions reused by one continuation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,6 +37,33 @@ pub struct BranchOutcome {
 pub struct KvPrefixGenerator {
     // Python keeps this state private to ``__init__``; the learner decides the
     // exact fields when implementing the bodies below.
+    model: Rc<RefCell<dyn GenerationModel>>,
+    tokenizer: Rc<RefCell<dyn GenerationTokenizer>>,
+    max_tokens: i64,
+    enable_thinking: bool,
+    checkpoint: Option<ModelCheckpoint>,
+    prefix_tokens: Vec<i64>,
+    prefix_caches: Vec<Box<dyn GenerationCache>>,
+    response_index: i64,
+    reuse: PrefixReuse,
+    restored: bool,
+}
+
+impl Clone for KvPrefixGenerator {
+    fn clone(&self) -> Self {
+        Self {
+            model: Rc::clone(&self.model),
+            tokenizer: Rc::clone(&self.tokenizer),
+            max_tokens: self.max_tokens,
+            enable_thinking: self.enable_thinking,
+            checkpoint: self.checkpoint.clone(),
+            prefix_tokens: self.prefix_tokens.clone(),
+            prefix_caches: self.clone_prefix_caches(),
+            response_index: self.response_index,
+            reuse: self.reuse.clone(),
+            restored: self.restored,
+        }
+    }
 }
 
 impl KvPrefixGenerator {
@@ -45,27 +74,112 @@ impl KvPrefixGenerator {
         max_tokens: i64,
         enable_thinking: bool,
     ) -> Self {
-        todo!()
+        // if max_tokens <= 0 {
+        //     return Err(to_agent_error("max_tokens must be a positive integer"));
+        // }
+        Self {
+            model,
+            tokenizer,
+            max_tokens,
+            enable_thinking,
+            checkpoint: None,
+            prefix_tokens: vec![],
+            prefix_caches: vec![],
+            response_index: 0,
+            reuse: PrefixReuse {
+                reused_tokens: 0,
+                layer_offsets: vec![],
+                avoided_prefill_tokens: 0,
+            },
+            restored: false,
+        }
     }
 
     /// Return the prefix positions used by the latest continuation.
     pub fn reuse(&self) -> PrefixReuse {
-        todo!()
+        self.reuse.clone()
+    }
+
+    fn clone_prefix_caches(&self) -> Vec<Box<dyn GenerationCache>> {
+        self.prefix_caches
+            .iter()
+            .map(|cache| {
+                cache
+                    .fork_box()
+                    .expect("failed to fork cached KV prefix for generator clone")
+            })
+            .collect()
     }
 
     /// Render and prefill one checkpoint prefix exactly once.
     pub fn save_checkpoint(&mut self, messages: &[Message]) -> Result<ModelCheckpoint, AgentError> {
-        todo!()
+        if self.checkpoint.is_some() {
+            return Err(AgentError("prefix checkpoint was already saved".into()));
+        }
+        let prompt = self.tokenizer.borrow_mut().apply_chat_template(
+            messages,
+            false,
+            false,
+            self.enable_thinking,
+        )?;
+        let token_ids = self.tokenizer.borrow_mut().encode(&prompt, false)?;
+        if token_ids.is_empty() {
+            return Err(to_agent_error(
+                "checkpoint prompt must contain at least one token",
+            ));
+        }
+
+        let mut caches = self.model.borrow().new_caches()?;
+        self.model
+            .borrow_mut()
+            .forward(&token_ids, 0, &mut caches, Some(1))?;
+
+        // if caches.iter().any(|cache| cache.key_values.is_none()) { err }
+        self.prefix_tokens = token_ids.clone();
+        self.prefix_caches = caches
+            .iter()
+            .map(|cache| cache.fork_box())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let offsets = caches
+            .iter()
+            .map(|cache| cache.offset())
+            .collect::<Vec<_>>();
+        let num_token = token_ids.len() as i64;
+        let checkpoint = ModelCheckpoint::new(
+            messages.len() as i64,
+            self.response_index,
+            token_ids,
+            offsets.clone(),
+        )?;
+        self.checkpoint = Some(checkpoint.clone());
+        self.reuse = PrefixReuse {
+            reused_tokens: num_token,
+            layer_offsets: offsets,
+            avoided_prefill_tokens: num_token,
+        };
+
+        Ok(checkpoint)
     }
 
     /// Bind a fresh continuation to this generator's frozen prefix.
     pub fn restore_checkpoint(&mut self, checkpoint: &ModelCheckpoint) -> Result<(), AgentError> {
-        todo!()
+        if self.checkpoint.as_ref() != Some(checkpoint) {
+            return Err(to_agent_error(
+                "model checkpoint does not match the saved KV prefix",
+            ));
+        }
+        self.response_index = checkpoint.response_index;
+        self.restored = true;
+        Ok(())
     }
 
     /// Create a fresh generator that shares only immutable prefix arrays.
-    pub fn fork(&self) -> KvPrefixGenerator {
-        todo!()
+    pub fn fork(&self) -> Result<Self, AgentError> {
+        if self.checkpoint.is_none() {
+            return Err(to_agent_error("save a prefix checkpoint before forking"));
+        }
+        Ok(self.clone())
     }
 
     /// Generate one continuation from the restored prefix.
@@ -73,7 +187,68 @@ impl KvPrefixGenerator {
     /// Python spells this ``__call__``, making the generator usable wherever a
     /// `Generate` callable is expected.
     pub fn call(&mut self, messages: &[Message]) -> Result<String, AgentError> {
-        todo!()
+        let err = Err(to_agent_error("restore the checkpoint before generating"));
+        if !self.restored {
+            return err;
+        }
+        let Some(checkpoint) = &self.checkpoint else {
+            return err;
+        };
+
+        let prompt = self.tokenizer.borrow_mut().apply_chat_template(
+            messages,
+            false,
+            true,
+            self.enable_thinking,
+        )?;
+        let token_ids = self.tokenizer.borrow_mut().encode(&prompt, false)?;
+
+        let prefix_size = self.prefix_tokens.len();
+        if token_ids[..prefix_size] != self.prefix_tokens {
+            return Err(to_agent_error(
+                "steered prompt does not extend the saved token prefix",
+            ));
+        }
+
+        let suffix = &token_ids[prefix_size..];
+        if suffix.is_empty() {
+            return Err(to_agent_error(
+                "steered prompt must add tokens after the saved prefix",
+            ));
+        }
+
+        let mut caches = self.clone_prefix_caches();
+        let mut logits =
+            self.model
+                .borrow_mut()
+                .forward(suffix, prefix_size as i64, &mut caches, Some(1))?;
+        let prefix_offset = token_ids.len() as i64;
+        let mut output = Vec::new();
+        for token_index in 0..self.max_tokens {
+            let next_token = logits
+                .iter()
+                .enumerate()
+                .max_by(|left, right| left.1.partial_cmp(right.1).unwrap())
+                .map(|(index, _)| index as i64)
+                .unwrap_or(self.tokenizer.borrow().eos_token_id());
+            if next_token == self.tokenizer.borrow().eos_token_id() {
+                break;
+            }
+            output.push(next_token);
+            logits = self.model.borrow_mut().forward(
+                &[next_token],
+                prefix_offset + token_index,
+                &mut caches,
+                Some(1),
+            )?;
+        }
+        self.response_index += 1;
+        self.reuse = PrefixReuse {
+            reused_tokens: prefix_size as i64,
+            layer_offsets: checkpoint.layer_offsets.clone(),
+            avoided_prefill_tokens: prefix_size as i64,
+        };
+        self.tokenizer.borrow_mut().decode(&output)
     }
 }
 
@@ -89,15 +264,52 @@ pub fn run_branch(
     case: &EvaluationCase,
     limits: Option<&AgentLimits>,
 ) -> Result<BranchOutcome, AgentError> {
-    todo!()
+    if name.trim().is_empty() {
+        return Err(to_agent_error("branch name must not be blank"));
+    }
+    let run = resume_with_steering(checkpoint, steering, generate, workspace, limits)?;
+    let report = evaluate_run(&run, workspace, receipts, case);
+    let Some(reuse) = generate.prefix_reuse() else {
+        return Err(to_agent_error(
+            "branch generator did not report prefix reuse",
+        ));
+    };
+    Ok(BranchOutcome {
+        name: name.to_string(),
+        steering: steering.to_string(),
+        run,
+        report,
+        reuse: PrefixReuse {
+            reused_tokens: reuse.0,
+            layer_offsets: reuse.1,
+            avoided_prefill_tokens: reuse.2,
+        },
+    })
 }
 
 /// Return one explicitly named passing branch.
-pub fn select_branch(
-    outcomes: &[BranchOutcome],
-    selected_name: &str,
-) -> Result<BranchOutcome, AgentError> {
-    todo!()
+pub fn select_branch<'a>(
+    outcomes: &'a [&BranchOutcome],
+    selected_name: &'a str,
+) -> Result<&'a BranchOutcome, AgentError> {
+    if selected_name.trim().is_empty() {
+        return Err(to_agent_error("selected branch name must not be blank"));
+    }
+    let matches = outcomes
+        .iter()
+        .filter(|out| out.name == selected_name)
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(to_agent_error(
+            "selected branch name must match exactly one outcome",
+        ));
+    }
+    let seleted = matches[0];
+    if !seleted.report.passed() {
+        return Err(to_agent_error("selected branch must pass evaluation"));
+    }
+
+    Ok(seleted)
 }
 
 // Adapter plumbing; generation and checkpoint behavior remain learner exercises.

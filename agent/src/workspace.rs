@@ -57,8 +57,13 @@ impl ApprovalDecision {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        // TODO: validate the decision and require a reason for denials.
-        todo!()
+        // validate the decision and require a reason for denials.
+        if !self.approved && self.reason.trim().is_empty() {
+            return Err(AgentError(
+                "a denial requires a nonblank operator reason".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -545,18 +550,14 @@ impl Workspace {
         if let Some(confirm_tool) = self.confirm_tool.as_ref() {
             match confirm_tool(action) {
                 ConfirmResult::Approved(false) => {
-                    return Err(AgentError(format!(
-                        "operator denied {} tool action",
-                        action.tool()
-                    )));
+                    return Err(AgentError("operator denied the tool action".into()));
                 }
                 ConfirmResult::Decision(ApprovalDecision {
                     approved: false,
                     reason,
                 }) => {
                     return Err(AgentError(format!(
-                        "operator denied {} tool action: {}",
-                        action.tool(),
+                        "operator denied the tool action: {}",
                         reason
                     )));
                 }
