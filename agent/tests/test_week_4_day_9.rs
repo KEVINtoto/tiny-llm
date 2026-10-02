@@ -93,8 +93,13 @@ fn test_task_0_supplied_capstone_composes_the_completed_active_package() {
     assert!(compact["saved_tokens"].as_i64().unwrap() > 0);
     assert_eq!(compact["receipt_ids"].as_array().unwrap().len(), 2);
     assert_eq!(
-        compact["checkpoint_status"]["last_action"],
-        r#"{"path":"build.log","tool":"read_file"}"#
+        serde_json::from_str::<Value>(
+            compact["checkpoint_status"]["last_action"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        json!({"path": "build.log", "tool": "read_file"})
     );
     let branches = first["branches"].as_array().unwrap();
     assert_eq!(branches.len(), 2);
@@ -241,6 +246,74 @@ fn test_task_1_artifact_store_preserves_exact_bytes_and_identity() {
 }
 
 #[test]
+fn test_task_1_artifact_identity_requires_a_full_match() {
+    let temp = test_utils::TestDir::new("day9-identity-full-match");
+    let mut store = ArtifactStore::new(temp.path().to_path_buf()).unwrap();
+    let record = store.put("content").unwrap();
+    for artifact_id in [
+        format!("prefix{}", record.artifact_id),
+        format!("{}/suffix", record.artifact_id),
+        format!("{}\n", record.artifact_id),
+    ] {
+        test_utils::assert_error_contains(
+            ArtifactRef::new(artifact_id.clone(), 7, record.sha256.clone()),
+            "artifact id is invalid",
+        );
+        test_utils::assert_error_contains(
+            store.read_range(&artifact_id, 0, 1),
+            "artifact id is invalid",
+        );
+        test_utils::assert_error_contains(
+            store.range_path(&artifact_id, 0, 1),
+            "artifact id is invalid",
+        );
+    }
+    test_utils::assert_error_contains(
+        ArtifactRef::new(record.artifact_id, 7, format!("{}\n", record.sha256)),
+        "artifact digest is invalid",
+    );
+}
+
+#[test]
+fn test_task_1_artifact_errors_verify_raw_bytes_and_hide_host_paths() {
+    let temp = test_utils::TestDir::new("day9-raw-byte-errors");
+    let mut bounded = default_bounded(&temp, "raw", "short");
+    let record = bounded.artifacts.put("short").unwrap();
+    let path = bounded
+        .artifacts
+        .range_path(&record.artifact_id, 0, 5)
+        .unwrap();
+    let stored_path = bounded.artifacts.root.join(&record.artifact_id);
+    // Same length, but neither the recorded bytes nor valid UTF-8.
+    fs::write(&stored_path, [0xff; 5]).unwrap();
+    assert_eq!(
+        bounded.execute(&test_utils::read_file_action(&path), None),
+        "error: artifact digest does not match its recorded identity",
+    );
+    test_utils::assert_error_contains(
+        bounded.artifacts.put("short"),
+        "artifact contents conflict with their identity",
+    );
+
+    fs::remove_file(&stored_path).unwrap();
+    assert_eq!(
+        bounded.execute(&test_utils::read_file_action(&path), None),
+        "error: could not read tool-result artifact",
+    );
+    // A failed store must not register an identity or expose its host root.
+    fs::remove_dir(&bounded.artifacts.root).unwrap();
+    test_utils::assert_error_contains(
+        bounded.artifacts.put("new content"),
+        "could not store tool-result artifact",
+    );
+    let new_id = format!("artifact-{}", test_utils::sha256(b"new content"));
+    test_utils::assert_error_contains(
+        bounded.artifacts.read_range(&new_id, 0, 1),
+        "artifact is not available in this store",
+    );
+}
+
+#[test]
 fn test_task_2_oversized_result_becomes_bounded_verifiable_observation() {
     let temp = test_utils::TestDir::new("day9-externalize");
     let content = format!("HEAD----{}----TAIL", "x".repeat(3_000));
@@ -361,6 +434,27 @@ fn test_task_2_four_byte_unicode_preview_ranges_are_byte_accurate() {
         content.len() - observed["tail_preview"].as_str().unwrap().len()
     );
     assert_eq!(observed["omitted_range"], json!([head_end, tail_start]));
+}
+
+#[test]
+fn test_task_2_json_escaping_is_included_in_the_observation_limit() {
+    let temp = test_utils::TestDir::new("day9-json-escaping");
+    let content = "\"\\\n\t\0🙂".repeat(100);
+    let mut bounded = bounded_workspace(&temp, "escaped", &content, 512, 512, 512);
+    let result = bounded.execute(&test_utils::read_file_action("build.log"), None);
+    assert!(result.len() <= 512);
+    let observed = test_utils::payload(&result, "Tool result externalized:\n");
+    let head_end = observed["head_range"][1].as_u64().unwrap() as usize;
+    let tail_start = observed["tail_range"][0].as_u64().unwrap() as usize;
+    assert_eq!(observed["head_preview"], content[..head_end]);
+    assert_eq!(observed["tail_preview"], content[tail_start..]);
+    assert!(head_end <= tail_start);
+    let range_path = observed["range_request"]["path"].as_str().unwrap();
+    let range = bounded.execute(&test_utils::read_file_action(range_path), None);
+    let selected = test_utils::payload(&range, "Artifact range:\n");
+    let end = selected["end"].as_u64().unwrap() as usize;
+    assert_eq!(selected["data"], content[..end]);
+    assert_eq!(selected["byte_count"], end);
 }
 
 #[test]
@@ -506,6 +600,8 @@ fn test_task_4_range_failures_are_ordinary_and_do_not_fall_through() {
         ("{artifact}/bytes/9-2", "0 <= start < end"),
         ("{artifact}/bytes/0-99", "exceeds 16 bytes"),
         ("{artifact}/bytes/0-16", "stored byte count"),
+        ("{artifact}/bytes/0-4/suffix", "path is malformed"),
+        ("{artifact}/bytes/0-4\n", "path is malformed"),
     ]
     .into_iter()
     .enumerate()
@@ -716,13 +812,13 @@ fn test_task_6_small_and_error_results_remain_inline_and_state_is_delegated() {
         0
     );
 
-    // Rust's concrete Workspace cannot be monkeypatched. An unknown, very long
-    // tool name produces the same oversized `error:` delegation case.
-    let long_tool = format!("missing-{}", "x".repeat(1_000));
-    let long_error = bounded.execute(&test_utils::tool_action(&long_tool, json!({})), None);
-    // .expect("workspace error is model-visible");
-    assert!(long_error.starts_with("error:"));
-    assert!(long_error.len() > 512);
+    // Read an oversized error observation through the concrete Workspace.
+    let long_error = format!("error: {}", "x".repeat(1_000));
+    fs::write(bounded.workspace.policy.root.join("build.log"), &long_error).unwrap();
+    assert_eq!(
+        bounded.execute(&test_utils::read_file_action("build.log"), None),
+        long_error,
+    );
     assert_eq!(
         fs::read_dir(&bounded.artifacts.root)
             .expect("list artifact root")
@@ -767,4 +863,35 @@ fn test_task_6_small_and_error_results_remain_inline_and_state_is_delegated() {
         .err()
         .expect("preview over inline cap must fail");
     assert!(error.to_string().contains("must not exceed"));
+}
+
+#[test]
+fn test_task_6_evidence_limits_must_be_positive() {
+    for (index, (inline, preview, range)) in [
+        (0, 64, 512),
+        (-1, 64, 512),
+        (512, 0, 512),
+        (512, -1, 512),
+        (512, 64, 0),
+        (512, 64, -1),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let temp = test_utils::TestDir::new(&format!("day9-positive-limits-{index}"));
+        let bounded = default_bounded(&temp, "limits", "short");
+        let error = BoundedEvidenceWorkspace::new(
+            bounded.workspace,
+            bounded.artifacts,
+            inline,
+            preview,
+            range,
+        )
+        .err()
+        .expect("non-positive evidence limit must fail");
+        assert_eq!(
+            error.to_string(),
+            "evidence limits must be positive integers"
+        );
+    }
 }

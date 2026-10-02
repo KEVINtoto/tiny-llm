@@ -96,3 +96,4 @@ jobs:
           --test test_week_4_day_6
           --test test_week_4_day_7
           --test test_week_4_day_8
+          --test test_week_4_day_9
