@@ -386,8 +386,8 @@ fn test_task_2_cached_prefix_is_prefilled_once_and_reused_by_both_forks() {
     let checkpoint = generator
         .save_checkpoint(&messages)
         .expect("save dense prefix");
-    let mut first = generator.fork();
-    let mut second = generator.fork();
+    let mut first = generator.fork().expect("fork success");
+    let mut second = generator.fork().expect("fork success");
     first
         .restore_checkpoint(&checkpoint)
         .expect("restore first fork");
@@ -455,7 +455,7 @@ fn test_task_3_steered_prompt_must_extend_the_exact_saved_token_prefix() {
         test_utils::message("user", "task"),
     ];
     let checkpoint = generator.save_checkpoint(&messages).expect("save prefix");
-    let mut branch = generator.fork();
+    let mut branch = generator.fork().expect("fork success");
 
     let foreign_model: Rc<RefCell<dyn GenerationModel>> =
         Rc::new(RefCell::new(DenseEosModel::default()));
@@ -673,9 +673,8 @@ fn test_task_4_forks_effects_and_receipts_then_isolates_later_branch_evidence() 
     assert!(passing.report.passed());
     assert!(!failing.report.passed());
     assert_eq!(
-        select_branch(&[passing.clone(), failing.clone()], "validate-only")
-            .expect("select passing branch"),
-        passing
+        select_branch(&[&passing, &failing], "validate-only").expect("select passing branch"),
+        &passing
     );
     assert_eq!(
         fs::read_to_string(temp.path().join("validate-only/app.py")).expect("read branch file"),
@@ -756,10 +755,10 @@ fn test_task_5_selection_requires_one_named_passing_outcome() {
     )
     .expect("run failing candidate");
 
-    let error = select_branch(std::slice::from_ref(&failing), "absent").unwrap_err();
+    let error = select_branch(std::slice::from_ref(&&failing), "absent").unwrap_err();
     assert!(error.to_string().contains("exactly one"));
-    let error = select_branch(&[failing.clone(), failing.clone()], "candidate").unwrap_err();
+    let error = select_branch(&[&failing, &failing], "candidate").unwrap_err();
     assert!(error.to_string().contains("exactly one"));
-    let error = select_branch(std::slice::from_ref(&failing), "candidate").unwrap_err();
+    let error = select_branch(std::slice::from_ref(&&failing), "candidate").unwrap_err();
     assert!(error.to_string().contains("must pass"));
 }

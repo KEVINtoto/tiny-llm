@@ -264,7 +264,8 @@ pub fn run_capstone() -> Value {
     .unwrap();
     assert!(passing.report.passed());
     assert!(!failing.report.passed());
-    let selected = select_branch(&[passing.clone(), failing.clone()], "validate-only").unwrap();
+    let binding = [&passing, &failing];
+    let selected = select_branch(&binding, "validate-only").unwrap();
     assert!(selected.run.events.iter().all(
         |e| !matches!(&e.action, Some(protocol::AgentAction::Tool(a)) if a.tool() == "edit_file")
     ));
