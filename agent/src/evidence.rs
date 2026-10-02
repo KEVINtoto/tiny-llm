@@ -3,10 +3,27 @@
 //! Week 4, Day 9: keep large tool evidence outside the model context.
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+
+use regex::Regex;
+use serde_json::json;
+use tempfile::NamedTempFile;
 
 use crate::protocol::{AgentError, AgentWorkspace, ToolAction};
+use crate::utils::{get_sha256_of_contents, to_agent_error};
 use crate::workspace::{ToolPolicy, Workspace};
+
+static ARTIFACT_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\Aartifact-[0-9a-f]{64}\z").expect("valid artifact ID regex"));
+static ARTIFACT_DIGEST: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\A[0-9a-f]{64}\z").expect("valid artifact digest regex"));
+static RANGE_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\A\.tool-artifacts/(artifact-[0-9a-f]{64})/bytes/([0-9]+)-([0-9]+)\z")
+        .expect("valid artifact range regex")
+});
 
 /// Identity and size of one exact externalized tool result.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -29,7 +46,22 @@ impl ArtifactRef {
 
     /// Python's ``__post_init__``.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        todo!()
+        if !ARTIFACT_ID.is_match(&self.artifact_id) {
+            return Err(to_agent_error("artifact id is invalid"));
+        }
+        if self.byte_count < 0 {
+            return Err(to_agent_error(
+                "artifact byte count must be a non-negative integer",
+            ));
+        }
+        if !ARTIFACT_DIGEST.is_match(&self.sha256) {
+            return Err(to_agent_error("artifact digest is invalid"));
+        }
+        if self.artifact_id != format!("artifact-{}", self.sha256) {
+            return Err(to_agent_error("artifact id must match its digest"));
+        }
+
+        Ok(())
     }
 }
 
@@ -42,7 +74,7 @@ pub struct ArtifactStore {
 
 impl ArtifactStore {
     pub fn new(root: PathBuf) -> Result<Self, AgentError> {
-        let store = Self {
+        let mut store = Self {
             root,
             records: HashMap::new(),
         };
@@ -51,13 +83,48 @@ impl ArtifactStore {
     }
 
     /// Python's ``__post_init__``.
-    pub fn post_init(&self) -> Result<(), AgentError> {
-        todo!()
+    pub fn post_init(&mut self) -> Result<(), AgentError> {
+        if self.root.is_symlink() {
+            return Err(to_agent_error("artifact root must not be a symlink"));
+        }
+        let absolute = self
+            .root
+            .canonicalize()
+            .map_err(|_| to_agent_error("artifact root must exist"))?;
+        if !absolute.is_dir() {
+            return Err(to_agent_error("artifact root must be a directory"));
+        }
+
+        self.root = absolute;
+        Ok(())
     }
 
     /// Persist one complete UTF-8 tool result and return its identity.
     pub fn put(&mut self, result: &str) -> Result<ArtifactRef, AgentError> {
-        todo!()
+        let digest = get_sha256_of_contents(&[result.as_bytes()]);
+        let artifact_id = format!("artifact-{}", digest);
+        let record = ArtifactRef::new(artifact_id.clone(), result.len() as i64, digest)?;
+        let path = self.root.join(&artifact_id);
+        if path.exists() {
+            let data = fs::read(&path)
+                .map_err(|_| to_agent_error("could not store tool-result artifact"))?;
+            if result.as_bytes() != data {
+                return Err(to_agent_error(
+                    "artifact contents conflict with their identity",
+                ));
+            }
+        } else {
+            let mut temp_file = NamedTempFile::new_in(&self.root)
+                .map_err(|_| to_agent_error("could not store tool-result artifact"))?;
+            temp_file
+                .write_all(result.as_bytes())
+                .map_err(|_| to_agent_error("could not store tool-result artifact"))?;
+            temp_file
+                .persist(&path)
+                .map_err(|_| to_agent_error("could not store tool-result artifact"))?;
+        }
+        self.records.insert(artifact_id, record.clone());
+        Ok(record)
     }
 
     /// Read one exact half-open byte range from a known artifact.
@@ -67,7 +134,33 @@ impl ArtifactStore {
         start: i64,
         end: i64,
     ) -> Result<Vec<u8>, AgentError> {
-        todo!()
+        if !ARTIFACT_ID.is_match(artifact_id) {
+            return Err(to_agent_error("artifact id is invalid"));
+        }
+        if start < 0 || end <= start {
+            return Err(to_agent_error(
+                "artifact range must satisfy 0 <= start < end",
+            ));
+        }
+        let Some(record) = self.records.get(artifact_id) else {
+            return Err(to_agent_error("artifact is not available in this store"));
+        };
+        let data = fs::read(self.root.join(artifact_id))
+            .map_err(|_| to_agent_error("could not read tool-result artifact"))?;
+        if data.len() != record.byte_count as usize
+            || get_sha256_of_contents(&[&data]) != record.sha256
+        {
+            return Err(to_agent_error(
+                "artifact digest does not match its recorded identity",
+            ));
+        }
+        if end as usize > data.len() {
+            return Err(to_agent_error(
+                "artifact range exceeds the stored byte count",
+            ));
+        }
+
+        Ok(data[start as usize..end as usize].to_vec())
     }
 
     /// Return the virtual read_file path for one explicit byte range.
@@ -77,7 +170,19 @@ impl ArtifactStore {
         start: i64,
         end: i64,
     ) -> Result<String, AgentError> {
-        todo!()
+        if !ARTIFACT_ID.is_match(artifact_id) {
+            return Err(to_agent_error("artifact id is invalid"));
+        }
+        if start < 0 || end <= start {
+            return Err(to_agent_error(
+                "artifact range must satisfy 0 <= start < end",
+            ));
+        }
+
+        Ok(format!(
+            ".tool-artifacts/{}/bytes/{}-{}",
+            artifact_id, start, end
+        ))
     }
 }
 
@@ -121,30 +226,137 @@ impl BoundedEvidenceWorkspace {
     /// Python also rejects a non-``int`` ``max_range_bytes``; the Rust type
     /// system already guarantees that.
     pub fn post_init(&self) -> Result<(), AgentError> {
-        if self.max_range_bytes < 4 {
-            return Err(AgentError("max_range_bytes must be at least 4".to_string()));
+        if self.max_inline_bytes <= 0 || self.preview_bytes <= 0 || self.max_range_bytes <= 0 {
+            return Err(to_agent_error("evidence limits must be positive integers"));
         }
+        if self.max_inline_bytes < 512 {
+            return Err(to_agent_error("max_inline_bytes must be at least 512"));
+        }
+        if self.max_range_bytes < 4 {
+            return Err(to_agent_error("max_range_bytes must be at least 4"));
+        }
+        if self.preview_bytes > self.max_inline_bytes {
+            return Err(to_agent_error(
+                "preview_bytes must not exceed max_inline_bytes",
+            ));
+        }
+
         Ok(())
     }
 
     /// Expose the wrapped policy to the existing system prompt.
     pub fn policy(&self) -> &ToolPolicy {
-        todo!()
+        self.workspace.policy()
     }
 
     /// Reuse exactly the wrapped workspace's existing tool schema.
     pub fn available_tools(&self) -> &HashSet<String> {
-        todo!()
+        self.workspace.available_tools()
     }
 
     /// Expose file-tool changes from the wrapped workspace.
     pub fn modified_files(&self) -> Vec<String> {
-        todo!()
+        self.workspace.modified_files()
     }
 
     /// Execute normally, externalizing only oversized model observations.
     pub fn execute(&mut self, action: &ToolAction, tool_call_id: Option<&str>) -> String {
-        todo!()
+        if let ToolAction::ReadFile { path } = action
+            && path.starts_with(".tool-artifacts/")
+        {
+            return self
+                .read_artifact_path(path)
+                .unwrap_or_else(|error| format!("error: {error}"));
+        }
+
+        let result = self.workspace.execute(action, tool_call_id);
+        if result.starts_with("error:") || result.len() <= self.max_inline_bytes as usize {
+            return result;
+        }
+        self.artifacts
+            .put(&result)
+            .and_then(|record| self.bounded_observation(&record, result.as_bytes()))
+            .unwrap_or_else(|error| format!("error: {error}"))
+    }
+
+    fn bounded_observation(&self, record: &ArtifactRef, data: &[u8]) -> Result<String, AgentError> {
+        let (_, suggested_end) = Self::head_preview(data, self.max_range_bytes as usize);
+        let range_path = self
+            .artifacts
+            .range_path(&record.artifact_id, 0, suggested_end as i64)?;
+        for preview_limit in (0..=self.preview_bytes as usize).rev() {
+            let (head, head_end) = Self::head_preview(data, preview_limit);
+            let (tail, tail_start) = Self::tail_preview(data, preview_limit, head_end);
+            let payload = json!({
+                "artifact_id": record.artifact_id,
+                "byte_count": record.byte_count,
+                "head_preview": head,
+                "head_range": [0, head_end],
+                "omitted_range": [head_end, tail_start],
+                "range_request": {"path": range_path, "tool": "read_file"},
+                "sha256": record.sha256,
+                "tail_preview": tail,
+                "tail_range": [tail_start as i64, record.byte_count],
+            });
+            let observation = format!("Tool result externalized:\n{payload}");
+            if observation.len() <= self.max_inline_bytes as usize {
+                return Ok(observation);
+            }
+        }
+        Err(to_agent_error(
+            "evidence observation limit is too small for artifact metadata",
+        ))
+    }
+
+    fn head_preview(data: &[u8], limit: usize) -> (&str, usize) {
+        let mut end = limit.min(data.len());
+        while end > 0 {
+            match std::str::from_utf8(&data[..end]) {
+                Ok(text) => return (text, end),
+                Err(error) => end = error.valid_up_to(),
+            }
+        }
+        ("", 0)
+    }
+
+    fn tail_preview(data: &[u8], limit: usize, head_end: usize) -> (&str, usize) {
+        let mut start = head_end.max(data.len().saturating_sub(limit));
+        while start < data.len() {
+            match std::str::from_utf8(&data[start..]) {
+                Ok(text) => return (text, start),
+                Err(_) => start += 1,
+            }
+        }
+        ("", data.len())
+    }
+
+    fn read_artifact_path(&self, path: &str) -> Result<String, AgentError> {
+        let malformed = || to_agent_error("artifact range path is malformed");
+        let captures = RANGE_PATH.captures(path).ok_or_else(malformed)?;
+        let artifact_id = &captures[1];
+        let start: i64 = captures[2].parse().map_err(|_| malformed())?;
+        let end: i64 = captures[3].parse().map_err(|_| malformed())?;
+        if end - start > self.max_range_bytes {
+            return Err(to_agent_error(format!(
+                "artifact range exceeds {} bytes",
+                self.max_range_bytes
+            )));
+        }
+        let data = self.artifacts.read_range(artifact_id, start, end)?;
+        let text = std::str::from_utf8(&data)
+            .map_err(|_| to_agent_error("artifact range does not align to UTF-8 text"))?;
+        let record = &self.artifacts.records[artifact_id];
+        let payload = json!({
+            "artifact_id": artifact_id,
+            "byte_count": data.len(),
+            "data": text,
+            "end": end,
+            "sha256": record.sha256,
+            "start": start,
+            "total_byte_count": record.byte_count,
+        });
+
+        Ok(format!("Artifact range:\n{payload}"))
     }
 }
 
